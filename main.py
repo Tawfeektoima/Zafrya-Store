@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-نظام إدارة محل زفرية - نظام كامل
-Zafrya Store Management System
+نظام إدارة محل زفرية - النسخة المحدثة
+Zafrya Store Management System - Fixed Version
 """
 
 import sys
@@ -13,9 +13,9 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QSpinBox, QDoubleSpinBox, QMessageBox, QTabWidget,
     QGroupBox, QFormLayout, QDialog, QDialogButtonBox, QHeaderView,
-    QTextEdit, QDateEdit
+    QTextEdit, QDateEdit, QCompleter
 )
-from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtCore import Qt, QDate, QStringListModel
 from PyQt5.QtGui import QFont, QColor
 
 class Database:
@@ -39,7 +39,8 @@ class Database:
                 purchase_price REAL NOT NULL,
                 selling_price REAL NOT NULL,
                 current_stock INTEGER DEFAULT 0,
-                min_stock_alert INTEGER DEFAULT 5
+                min_stock_alert INTEGER DEFAULT 5,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -73,7 +74,9 @@ class Database:
             sample_products = [
                 ('ش42DC', 'شبشب DC مقاس 42', 'شباشب', '42', 'DC', 80.0, 120.0, 25),
                 ('ش40AB', 'شبشب Adidas مقاس 40', 'شباشب', '40', 'Adidas', 100.0, 150.0, 15),
+                ('ش38DC', 'شبشب DC مقاس 38', 'شباشب', '38', 'DC', 75.0, 115.0, 30),
                 ('د38A4', 'دفتر A4 38 ورقة', 'أدوات مدرسية', '', 'مصر', 15.0, 25.0, 50),
+                ('د50A5', 'دفتر A5 50 ورقة', 'أدوات مدرسية', '', 'مصر', 18.0, 30.0, 40),
                 ('ق40SB', 'قميص رجالي مقاس 40', 'ملابس', '40', 'LC', 150.0, 220.0, 10),
             ]
             cursor.executemany("""
@@ -93,8 +96,14 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.load_data()
 
+        # تحديث لوحة التحكم تلقائياً كل 5 ثواني
+        from PyQt5.QtCore import QTimer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_dashboard)
+        self.refresh_timer.start(5000)  # كل 5 ثواني
+
     def init_ui(self):
-        self.setWindowTitle('نظام إدارة محل زفرية - نظام كامل')
+        self.setWindowTitle('نظام إدارة محل زفرية - النسخة المحدثة')
         self.setGeometry(50, 50, 1400, 800)
 
         central = QWidget()
@@ -122,15 +131,44 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tabs)
 
         central.setLayout(layout)
-        self.statusBar().showMessage('النظام جاهز ✅')
+        self.statusBar().showMessage('النظام جاهز ✅ | آخر تحديث: ' + datetime.now().strftime('%H:%M:%S'))
 
     def create_dashboard_tab(self):
         """لوحة التحكم"""
         widget = QWidget()
-        layout = QVBoxLayout()
+        self.dashboard_layout = QVBoxLayout()
 
-        # إحصائيات اليوم
-        stats_layout = QHBoxLayout()
+        # سيتم ملء المحتوى في refresh_dashboard
+        self.dashboard_stats_layout = QHBoxLayout()
+        self.dashboard_layout.addLayout(self.dashboard_stats_layout)
+
+        # جدول المنتجات المنخفضة
+        low_stock_label = QLabel('⚠️ تنبيهات المخزون المنخفض')
+        low_stock_label.setFont(QFont('Arial', 14, QFont.Bold))
+        self.dashboard_layout.addWidget(low_stock_label)
+
+        self.low_stock_table = QTableWidget()
+        self.low_stock_table.setColumnCount(6)
+        self.low_stock_table.setHorizontalHeaderLabels(['الكود', 'اسم المنتج', 'الفئة', 'المخزون', 'الحد الأدنى', 'الحالة'])
+        self.low_stock_table.horizontalHeader().setStretchLastSection(True)
+        self.dashboard_layout.addWidget(self.low_stock_table)
+
+        # زر التحديث اليدوي
+        refresh_btn = QPushButton('🔄 تحديث البيانات')
+        refresh_btn.clicked.connect(self.refresh_dashboard)
+        refresh_btn.setStyleSheet("background: #3498db; color: white; padding: 10px; font-size: 14px;")
+        self.dashboard_layout.addWidget(refresh_btn)
+
+        widget.setLayout(self.dashboard_layout)
+        return widget
+
+    def refresh_dashboard(self):
+        """تحديث لوحة التحكم"""
+        # مسح البطاقات القديمة
+        while self.dashboard_stats_layout.count():
+            child = self.dashboard_stats_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
@@ -149,27 +187,18 @@ class MainWindow(QMainWindow):
 
         conn.close()
 
-        stats_layout.addWidget(self.create_stat_card('عدد الفواتير اليوم', str(sales_count), '#3498db'))
-        stats_layout.addWidget(self.create_stat_card('إجمالي المبيعات', f'{total_sales:.2f} ج', '#2ecc71'))
-        stats_layout.addWidget(self.create_stat_card('صافي الربح', f'{total_profit:.2f} ج', '#f39c12'))
-        stats_layout.addWidget(self.create_stat_card('قيمة المخزون', f'{inventory_value:.2f} ج', '#9b59b6'))
-        stats_layout.addWidget(self.create_stat_card('تنبيهات المخزون', str(low_stock), '#e74c3c'))
+        # إضافة البطاقات الجديدة
+        self.dashboard_stats_layout.addWidget(self.create_stat_card('عدد الفواتير اليوم', str(sales_count), '#3498db'))
+        self.dashboard_stats_layout.addWidget(self.create_stat_card('إجمالي المبيعات', f'{total_sales:.2f} ج', '#2ecc71'))
+        self.dashboard_stats_layout.addWidget(self.create_stat_card('صافي الربح', f'{total_profit:.2f} ج', '#f39c12'))
+        self.dashboard_stats_layout.addWidget(self.create_stat_card('قيمة المخزون', f'{inventory_value:.2f} ج', '#9b59b6'))
+        self.dashboard_stats_layout.addWidget(self.create_stat_card('تنبيهات المخزون', str(low_stock), '#e74c3c'))
 
-        layout.addLayout(stats_layout)
+        # تحديث جدول المنتجات المنخفضة
+        self.load_low_stock_table()
 
-        # جدول المنتجات المنخفضة
-        low_stock_label = QLabel('⚠️ تنبيهات المخزون المنخفض')
-        low_stock_label.setFont(QFont('Arial', 14, QFont.Bold))
-        layout.addWidget(low_stock_label)
-
-        self.low_stock_table = QTableWidget()
-        self.low_stock_table.setColumnCount(6)
-        self.low_stock_table.setHorizontalHeaderLabels(['الكود', 'اسم المنتج', 'الفئة', 'المخزون', 'الحد الأدنى', 'الحالة'])
-        self.low_stock_table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.low_stock_table)
-
-        widget.setLayout(layout)
-        return widget
+        # تحديث شريط الحالة
+        self.statusBar().showMessage('✅ تم التحديث | الوقت: ' + datetime.now().strftime('%H:%M:%S'))
 
     def create_stat_card(self, title, value, color):
         """إنشاء بطاقة إحصائية"""
@@ -187,7 +216,7 @@ class MainWindow(QMainWindow):
         return group
 
     def create_pos_tab(self):
-        """نقطة البيع"""
+        """نقطة البيع مع بحث تلقائي"""
         widget = QWidget()
         main_layout = QHBoxLayout()
 
@@ -195,22 +224,22 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout()
 
         search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel('🔍 بحث:'))
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText('ابحث بالكود أو الاسم...')
-        self.search_input.returnPressed.connect(self.search_products)
-        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(QLabel('🔍 بحث تلقائي:'))
 
-        search_btn = QPushButton('بحث')
-        search_btn.clicked.connect(self.search_products)
-        search_btn.setStyleSheet("background: #3498db; color: white; padding: 8px;")
-        search_layout.addWidget(search_btn)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText('اكتب للبحث التلقائي (مثل: DC, دفتر, شبشب)...')
+
+        # إضافة البحث التلقائي
+        self.search_input.textChanged.connect(self.live_search_products)
+
+        search_layout.addWidget(self.search_input)
 
         left_layout.addLayout(search_layout)
 
+        # جدول نتائج البحث
         self.search_results_table = QTableWidget()
         self.search_results_table.setColumnCount(7)
-        self.search_results_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'السعر', 'المخزون', 'الكمية', 'إضافة', ''])
+        self.search_results_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'السعر', 'المخزون', 'الكمية', 'إضافة'])
         self.search_results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         left_layout.addWidget(self.search_results_table)
 
@@ -271,7 +300,7 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(add_btn)
 
         refresh_btn = QPushButton('🔄 تحديث')
-        refresh_btn.clicked.connect(self.load_products_table)
+        refresh_btn.clicked.connect(self.load_all_data)
         refresh_btn.setStyleSheet("background: #3498db; color: white; padding: 10px;")
         btn_layout.addWidget(refresh_btn)
 
@@ -292,9 +321,20 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout()
 
+        btn_layout = QHBoxLayout()
+
         label = QLabel('📊 حالة المخزون الحالية')
         label.setFont(QFont('Arial', 14, QFont.Bold))
-        layout.addWidget(label)
+        btn_layout.addWidget(label)
+
+        btn_layout.addStretch()
+
+        refresh_btn = QPushButton('🔄 تحديث المخزون')
+        refresh_btn.clicked.connect(self.load_inventory_table)
+        refresh_btn.setStyleSheet("background: #3498db; color: white; padding: 8px;")
+        btn_layout.addWidget(refresh_btn)
+
+        layout.addLayout(btn_layout)
 
         self.inventory_table = QTableWidget()
         self.inventory_table.setColumnCount(7)
@@ -306,39 +346,49 @@ class MainWindow(QMainWindow):
         return widget
 
     def create_reports_tab(self):
-        """التقارير"""
+        """التقارير المحسنة"""
         widget = QWidget()
         layout = QVBoxLayout()
 
+        header_layout = QHBoxLayout()
         label = QLabel('📈 تقارير المبيعات والأرباح')
         label.setFont(QFont('Arial', 14, QFont.Bold))
-        layout.addWidget(label)
+        header_layout.addWidget(label)
+        header_layout.addStretch()
+
+        generate_btn = QPushButton('📊 تحديث التقرير')
+        generate_btn.clicked.connect(self.generate_daily_report)
+        generate_btn.setStyleSheet("background: #9b59b6; color: white; padding: 10px; font-size: 13px;")
+        header_layout.addWidget(generate_btn)
+
+        layout.addLayout(header_layout)
 
         self.report_text = QTextEdit()
         self.report_text.setReadOnly(True)
         self.report_text.setFont(QFont('Courier New', 11))
+        self.report_text.setStyleSheet("background: #2c3e50; color: #ecf0f1; padding: 15px;")
         layout.addWidget(self.report_text)
-
-        generate_btn = QPushButton('📊 إنشاء تقرير اليوم')
-        generate_btn.clicked.connect(self.generate_daily_report)
-        generate_btn.setStyleSheet("background: #9b59b6; color: white; padding: 12px; font-size: 14px;")
-        layout.addWidget(generate_btn)
 
         widget.setLayout(layout)
         return widget
 
     def load_data(self):
-        """تحميل البيانات"""
-        self.load_low_stock_table()
+        """تحميل جميع البيانات"""
+        self.refresh_dashboard()
         self.load_products_table()
         self.load_inventory_table()
         self.generate_daily_report()
+
+    def load_all_data(self):
+        """تحديث جميع الصفحات"""
+        self.load_data()
+        QMessageBox.information(self, 'تم التحديث', 'تم تحديث جميع البيانات بنجاح ✅')
 
     def load_low_stock_table(self):
         """تحميل جدول المنتجات المنخفضة"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT product_code, product_name, category, current_stock, min_stock_alert FROM products WHERE current_stock <= min_stock_alert")
+        cursor.execute("SELECT product_code, product_name, category, current_stock, min_stock_alert FROM products WHERE current_stock <= min_stock_alert ORDER BY current_stock ASC")
 
         self.low_stock_table.setRowCount(0)
         for row_data in cursor.fetchall():
@@ -349,10 +399,15 @@ class MainWindow(QMainWindow):
                 item = QTableWidgetItem(str(value))
                 if row_data[3] == 0:
                     item.setBackground(QColor(255, 200, 200))
+                elif row_data[3] <= 5:
+                    item.setBackground(QColor(255, 235, 200))
                 self.low_stock_table.setItem(row, col, item)
 
             status = 'نفذ ⛔' if row_data[3] == 0 else 'منخفض ⚠️'
-            self.low_stock_table.setItem(row, 5, QTableWidgetItem(status))
+            status_item = QTableWidgetItem(status)
+            if row_data[3] == 0:
+                status_item.setBackground(QColor(255, 200, 200))
+            self.low_stock_table.setItem(row, 5, status_item)
 
         conn.close()
 
@@ -360,7 +415,7 @@ class MainWindow(QMainWindow):
         """تحميل جدول المنتجات"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT product_id, product_code, product_name, category, size, manufacturer, purchase_price, selling_price, current_stock FROM products")
+        cursor.execute("SELECT product_id, product_code, product_name, category, size, manufacturer, purchase_price, selling_price, current_stock FROM products ORDER BY product_name")
 
         self.products_table.setRowCount(0)
         for row_data in cursor.fetchall():
@@ -372,16 +427,16 @@ class MainWindow(QMainWindow):
 
             del_btn = QPushButton('🗑️')
             del_btn.clicked.connect(lambda checked, pid=row_data[0]: self.delete_product(pid))
-            del_btn.setStyleSheet("background: #e74c3c; color: white;")
+            del_btn.setStyleSheet("background: #e74c3c; color: white; padding: 3px;")
             self.products_table.setCellWidget(row, 8, del_btn)
 
         conn.close()
 
     def load_inventory_table(self):
-        """تحميل جدول المخزون"""
+        """تحميل جدول المخزون - محدث"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT product_code, product_name, category, purchase_price, selling_price, current_stock FROM products")
+        cursor.execute("SELECT product_code, product_name, category, purchase_price, selling_price, current_stock FROM products ORDER BY category, product_name")
 
         self.inventory_table.setRowCount(0)
         for row_data in cursor.fetchall():
@@ -396,19 +451,28 @@ class MainWindow(QMainWindow):
 
         conn.close()
 
-    def search_products(self):
-        """البحث عن منتجات"""
+    def live_search_products(self):
+        """البحث التلقائي المباشر"""
         search_term = self.search_input.text().strip()
-        if not search_term:
+
+        if len(search_term) < 1:
+            self.search_results_table.setRowCount(0)
             return
 
         conn = sqlite3.connect(self.db.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
+
+        # بحث شامل في الكود، الاسم، الفئة، والشركة
         cursor.execute("""
             SELECT * FROM products 
-            WHERE product_code LIKE ? OR product_name LIKE ?
-        """, (f'%{search_term}%', f'%{search_term}%'))
+            WHERE product_code LIKE ? 
+               OR product_name LIKE ? 
+               OR category LIKE ?
+               OR manufacturer LIKE ?
+            ORDER BY product_name
+            LIMIT 20
+        """, (f'%{search_term}%', f'%{search_term}%', f'%{search_term}%', f'%{search_term}%'))
 
         self.search_results_table.setRowCount(0)
 
@@ -418,19 +482,20 @@ class MainWindow(QMainWindow):
 
             self.search_results_table.setItem(row, 0, QTableWidgetItem(row_data['product_code']))
             self.search_results_table.setItem(row, 1, QTableWidgetItem(row_data['product_name']))
-            self.search_results_table.setItem(row, 2, QTableWidgetItem(f"{row_data['selling_price']:.2f}"))
-            self.search_results_table.setItem(row, 3, QTableWidgetItem(str(row_data['current_stock'])))
+            self.search_results_table.setItem(row, 2, QTableWidgetItem(row_data['category']))
+            self.search_results_table.setItem(row, 3, QTableWidgetItem(f"{row_data['selling_price']:.2f}"))
+            self.search_results_table.setItem(row, 4, QTableWidgetItem(str(row_data['current_stock'])))
 
             qty_spin = QSpinBox()
             qty_spin.setMinimum(1)
-            qty_spin.setMaximum(row_data['current_stock'])
+            qty_spin.setMaximum(max(1, row_data['current_stock']))
             qty_spin.setValue(1)
-            self.search_results_table.setCellWidget(row, 4, qty_spin)
+            self.search_results_table.setCellWidget(row, 5, qty_spin)
 
             add_btn = QPushButton('➕ إضافة')
             add_btn.clicked.connect(lambda checked, r=row_data, sp=qty_spin: self.add_to_cart(dict(r), sp.value()))
-            add_btn.setStyleSheet("background: #27ae60; color: white; padding: 5px;")
-            self.search_results_table.setCellWidget(row, 5, add_btn)
+            add_btn.setStyleSheet("background: #27ae60; color: white; padding: 5px; font-weight: bold;")
+            self.search_results_table.setCellWidget(row, 6, add_btn)
 
         conn.close()
 
@@ -457,7 +522,6 @@ class MainWindow(QMainWindow):
 
         self.refresh_cart()
         self.search_input.clear()
-        self.search_results_table.setRowCount(0)
 
     def refresh_cart(self):
         """تحديث السلة"""
@@ -479,7 +543,7 @@ class MainWindow(QMainWindow):
 
             del_btn = QPushButton('🗑️')
             del_btn.clicked.connect(lambda checked, idx=i: self.remove_from_cart(idx))
-            del_btn.setStyleSheet("background: #e74c3c; color: white;")
+            del_btn.setStyleSheet("background: #e74c3c; color: white; padding: 3px;")
             self.cart_table.setCellWidget(row, 5, del_btn)
 
         self.total_label.setText(f'{total:.2f} جنيه')
@@ -527,14 +591,14 @@ class MainWindow(QMainWindow):
             conn.commit()
 
             QMessageBox.information(self, 'نجح ✅', 
-                                  f'تمت عملية البيع بنجاح!\n'
+                                  f'تمت عملية البيع بنجاح!\n\n'
                                   f'رقم الفاتورة: {sale_id}\n'
                                   f'الإجمالي: {total_amount:.2f} جنيه\n'
                                   f'الربح: {total_profit:.2f} جنيه')
 
             self.cart_items = []
             self.refresh_cart()
-            self.load_data()
+            self.load_data()  # تحديث كل البيانات
 
         except Exception as e:
             conn.rollback()
@@ -547,33 +611,48 @@ class MainWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle('إضافة منتج جديد')
         dialog.setModal(True)
+        dialog.setMinimumWidth(400)
 
         layout = QFormLayout()
 
         code_input = QLineEdit()
+        code_input.setPlaceholderText('مثال: ش42DC')
+
         name_input = QLineEdit()
+        name_input.setPlaceholderText('مثال: شبشب DC مقاس 42')
+
         category_input = QComboBox()
         category_input.addItems(['أدوات مدرسية', 'ملابس', 'شباشب', 'أخرى'])
         category_input.setEditable(True)
+
         size_input = QLineEdit()
+        size_input.setPlaceholderText('مثال: 42')
+
         manufacturer_input = QLineEdit()
+        manufacturer_input.setPlaceholderText('مثال: DC')
+
         purchase_price_input = QDoubleSpinBox()
         purchase_price_input.setMaximum(100000)
         purchase_price_input.setDecimals(2)
+        purchase_price_input.setPrefix('ج ')
+
         selling_price_input = QDoubleSpinBox()
         selling_price_input.setMaximum(100000)
         selling_price_input.setDecimals(2)
+        selling_price_input.setPrefix('ج ')
+
         stock_input = QSpinBox()
         stock_input.setMaximum(100000)
+        stock_input.setSuffix(' قطعة')
 
-        layout.addRow('الكود:', code_input)
-        layout.addRow('الاسم:', name_input)
-        layout.addRow('الفئة:', category_input)
+        layout.addRow('الكود *:', code_input)
+        layout.addRow('الاسم *:', name_input)
+        layout.addRow('الفئة *:', category_input)
         layout.addRow('المقاس:', size_input)
         layout.addRow('الشركة:', manufacturer_input)
-        layout.addRow('سعر الشراء:', purchase_price_input)
-        layout.addRow('سعر البيع:', selling_price_input)
-        layout.addRow('الكمية:', stock_input)
+        layout.addRow('سعر الشراء *:', purchase_price_input)
+        layout.addRow('سعر البيع *:', selling_price_input)
+        layout.addRow('الكمية الأولية:', stock_input)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(lambda: self.save_product(
@@ -594,6 +673,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'خطأ', 'الكود والاسم مطلوبان!')
             return
 
+        if purchase_price <= 0 or selling_price <= 0:
+            QMessageBox.warning(self, 'خطأ', 'الأسعار يجب أن تكون أكبر من صفر!')
+            return
+
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
 
@@ -605,17 +688,25 @@ class MainWindow(QMainWindow):
             """, (code, name, category, size, manufacturer, purchase_price, selling_price, stock))
 
             conn.commit()
-            QMessageBox.information(self, 'نجح', 'تم إضافة المنتج بنجاح!')
+            QMessageBox.information(self, 'نجح ✅', f'تم إضافة المنتج "{name}" بنجاح!')
             dialog.accept()
+
+            # تحديث جميع الجداول
             self.load_products_table()
+            self.load_inventory_table()
+            self.refresh_dashboard()
+
         except sqlite3.IntegrityError:
-            QMessageBox.warning(self, 'خطأ', 'الكود موجود مسبقاً!')
+            QMessageBox.warning(self, 'خطأ', f'الكود "{code}" موجود مسبقاً!')
+        except Exception as e:
+            QMessageBox.critical(self, 'خطأ', f'فشل حفظ المنتج:\n{str(e)}')
         finally:
             conn.close()
 
     def delete_product(self, product_id):
         """حذف منتج"""
-        reply = QMessageBox.question(self, 'تأكيد', 'هل تريد حذف هذا المنتج؟',
+        reply = QMessageBox.question(self, 'تأكيد الحذف', 
+                                    'هل تريد حذف هذا المنتج نهائياً؟\nلا يمكن التراجع عن هذه العملية!',
                                     QMessageBox.Yes | QMessageBox.No)
 
         if reply == QMessageBox.Yes:
@@ -626,21 +717,26 @@ class MainWindow(QMainWindow):
             conn.close()
 
             self.load_products_table()
-            QMessageBox.information(self, 'نجح', 'تم حذف المنتج')
+            self.load_inventory_table()
+            self.refresh_dashboard()
+            QMessageBox.information(self, 'تم الحذف', 'تم حذف المنتج بنجاح ✅')
 
     def generate_daily_report(self):
-        """إنشاء تقرير يومي"""
+        """إنشاء تقرير يومي محسّن"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
 
+        # إحصائيات اليوم
         cursor.execute("""
             SELECT COUNT(*), COALESCE(SUM(total_amount), 0), COALESCE(SUM(total_profit), 0)
             FROM sales WHERE DATE(sale_date) = DATE('now')
         """)
         sales_count, total_sales, total_profit = cursor.fetchone()
 
+        # أفضل المنتجات
         cursor.execute("""
-            SELECT si.product_name, SUM(si.quantity) as qty, SUM(si.subtotal) as revenue
+            SELECT si.product_name, si.product_code, SUM(si.quantity) as qty, 
+                   SUM(si.subtotal) as revenue, SUM(si.item_profit) as profit
             FROM sale_items si
             JOIN sales s ON si.sale_id = s.sale_id
             WHERE DATE(s.sale_date) = DATE('now')
@@ -650,32 +746,85 @@ class MainWindow(QMainWindow):
         """)
         best_sellers = cursor.fetchall()
 
+        # آخر 5 فواتير
+        cursor.execute("""
+            SELECT sale_id, sale_date, total_amount, total_profit
+            FROM sales
+            WHERE DATE(sale_date) = DATE('now')
+            ORDER BY sale_date DESC
+            LIMIT 5
+        """)
+        recent_sales = cursor.fetchall()
+
+        # إحصائيات المخزون
+        cursor.execute("SELECT COUNT(*), SUM(current_stock), SUM(current_stock * purchase_price) FROM products")
+        product_count, total_qty, inventory_value = cursor.fetchone()
+
+        cursor.execute("SELECT COUNT(*) FROM products WHERE current_stock <= min_stock_alert")
+        low_stock_count = cursor.fetchone()[0]
+
         conn.close()
 
+        # تنسيق التقرير المحسّن
         report = f"""
-{'='*60}
-        تقرير مبيعات اليوم - {datetime.now().strftime('%Y-%m-%d')}
-{'='*60}
+╔══════════════════════════════════════════════════════════════════════╗
+║                     📊 تقرير مبيعات اليوم                          ║
+║                  {datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}                   ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-📊 الملخص العام:
-   • عدد الفواتير: {sales_count}
-   • إجمالي المبيعات: {total_sales:.2f} جنيه
-   • صافي الربح: {total_profit:.2f} جنيه
-   • متوسط الفاتورة: {(total_sales / sales_count if sales_count > 0 else 0):.2f} جنيه
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📈 ملخص المبيعات اليومية                                          │
+└─────────────────────────────────────────────────────────────────────┘
 
-{'='*60}
-🏆 أفضل المنتجات مبيعاً:
+  💰 إجمالي المبيعات:        {total_sales:>12.2f} جنيه
+  💵 صافي الربح:             {total_profit:>12.2f} جنيه
+  📋 عدد الفواتير:           {sales_count:>12} فاتورة
+  📊 متوسط الفاتورة:         {(total_sales / sales_count if sales_count > 0 else 0):>12.2f} جنيه
+  📈 هامش الربح:             {((total_profit / total_sales * 100) if total_sales > 0 else 0):>11.1f} %
 
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🏆 أفضل 5 منتجات مبيعاً                                           │
+└─────────────────────────────────────────────────────────────────────┘
 """
 
-        for i, (name, qty, revenue) in enumerate(best_sellers, 1):
-            report += f"   {i}. {name}\n"
-            report += f"      الكمية: {qty} | الإيرادات: {revenue:.2f} ج\n\n"
+        if best_sellers:
+            for i, (name, code, qty, revenue, profit) in enumerate(best_sellers, 1):
+                report += f"""
+  {i}. [{code}] {name}
+     ├─ الكمية المباعة: {qty} قطعة
+     ├─ الإيرادات: {revenue:.2f} جنيه
+     └─ الربح: {profit:.2f} جنيه
+"""
+        else:
+            report += "\n  ⚠️  لا توجد مبيعات حتى الآن\n"
 
-        if not best_sellers:
-            report += "   لا توجد مبيعات اليوم\n"
+        report += f"""
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🧾 آخر الفواتير                                                    │
+└─────────────────────────────────────────────────────────────────────┘
+"""
 
-        report += "\n" + "="*60
+        if recent_sales:
+            for sale_id, sale_date, amount, profit in recent_sales:
+                time_str = datetime.strptime(sale_date, '%Y-%m-%d %H:%M:%S').strftime('%H:%M:%S')
+                report += f"  • فاتورة #{sale_id:<4} | {time_str} | {amount:>8.2f} ج | ربح: {profit:>6.2f} ج\n"
+        else:
+            report += "  ⚠️  لا توجد فواتير اليوم\n"
+
+        report += f"""
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📦 حالة المخزون                                                    │
+└─────────────────────────────────────────────────────────────────────┘
+
+  📊 عدد المنتجات:          {product_count:>12} منتج
+  📦 إجمالي الكمية:         {total_qty:>12} قطعة
+  💰 قيمة المخزون:          {inventory_value:>12.2f} جنيه
+  ⚠️  تنبيهات المخزون:      {low_stock_count:>12} منتج
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  تم إنشاء التقرير بواسطة: نظام محل زفرية                          ║
+╚══════════════════════════════════════════════════════════════════════╝
+"""
 
         self.report_text.setPlainText(report)
 

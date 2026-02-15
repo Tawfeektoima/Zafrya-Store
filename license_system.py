@@ -18,7 +18,7 @@ class LicenseSystem:
     
     def __init__(self):
         self.license_file = 'zafrya.lic'
-        self.master_key = 'ZAFRYA-2026-SECRET-KEY'  # غيّر ده بمفتاح سري خاص بيك
+        self.master_key = 'taw11-feek22-ali$$-7102023'
     
     def get_hardware_id(self):
         """الحصول على معرّف الجهاز الفريد"""

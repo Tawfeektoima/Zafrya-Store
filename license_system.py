@@ -57,18 +57,17 @@ class LicenseSystem:
             return None
     
     def generate_license_key(self, hwid, customer_name=""):
-        """توليد مفتاح ترخيص لجهاز معين"""
-        # دمج HWID + Master Key + Customer Name
-        combined = f"{hwid}-{self.master_key}-{customer_name}"
-        
-        # تشفير
-        license_hash = hashlib.sha256(combined.encode()).hexdigest()
-        
-        # تنسيق المفتاح: XXXX-XXXX-XXXX-XXXX
-        key_parts = [license_hash[i:i+4].upper() for i in range(0, 16, 4)]
-        license_key = '-'.join(key_parts)
-        
-        return license_key
+    """توليد مفتاح ترخيص لجهاز معين"""
+    # المفتاح يعتمد فقط على HWID + المفتاح السري
+    combined = f"{hwid}-{self.master_key}"
+    
+    license_hash = hashlib.sha256(combined.encode()).hexdigest()
+    
+    # تنسيق المفتاح: XXXX-XXXX-XXXX-XXXX
+    key_parts = [license_hash[i:i+4].upper() for i in range(0, 16, 4)]
+    license_key = '-'.join(key_parts)
+    
+    return license_key
     
     def validate_license_key(self, entered_key, hwid):
         """التحقق من صحة مفتاح الترخيص"""

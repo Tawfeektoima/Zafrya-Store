@@ -113,7 +113,7 @@ class AnalyticsProfitDialog(QDialog):
         super().__init__(parent)
         self.db_path = db_path
         self.setWindowTitle('📊 Analytics & Profits - تحليلات الأرباح')
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(1000, 700)
         self.init_ui()
 
     def init_ui(self):
@@ -157,9 +157,78 @@ class AnalyticsProfitDialog(QDialog):
 
         layout.addLayout(stats_layout)
 
-        # جدول تفصيلي بالأرباح
+        # === جدول تحليل الأقسام الجديد ===
+        category_label = QLabel('📂 تحليل العوائد والتكاليف حسب الأقسام')
+        category_label.setFont(QFont('Arial', 12, QFont.Bold))
+        category_label.setStyleSheet("color: #2c3e50; margin-top: 10px;")
+        layout.addWidget(category_label)
+
+        self.category_table = QTableWidget()
+        self.category_table.setColumnCount(6)
+        self.category_table.setHorizontalHeaderLabels(['القسم', 'العوائد (مبيعات)', 'التكلفة', 'الربح', 'هامش الربح %', 'الكمية المباعة'])
+        self.category_table.horizontalHeader().setStretchLastSection(True)
+        self.category_table.setMaximumHeight(200)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # استعلام لحساب العوائد والتكاليف والأرباح لكل فئة
+        cursor.execute("""
+            SELECT 
+                p.category,
+                SUM(si.subtotal) as revenue,
+                SUM(si.quantity * si.purchase_price) as cost,
+                SUM(si.item_profit) as profit,
+                SUM(si.quantity) as total_qty
+            FROM sale_items si
+            JOIN products p ON si.product_id = p.product_id
+            JOIN sales s ON si.sale_id = s.sale_id
+            GROUP BY p.category
+            ORDER BY profit DESC
+        """)
+
+        for row_data in cursor.fetchall():
+            row = self.category_table.rowCount()
+            self.category_table.insertRow(row)
+
+            category = row_data[0]
+            revenue = row_data[1]
+            cost = row_data[2]
+            profit = row_data[3]
+            total_qty = row_data[4]
+            margin = (profit / revenue * 100) if revenue > 0 else 0
+
+            # تلوين حسب هامش الربح
+            if margin >= 30:
+                bg_color = QColor(200, 255, 200)  # أخضر فاتح
+            elif margin >= 20:
+                bg_color = QColor(255, 255, 200)  # أصفر فاتح
+            else:
+                bg_color = QColor(255, 230, 230)  # أحمر فاتح
+
+            items = [
+                QTableWidgetItem(category),
+                QTableWidgetItem(f"{revenue:.2f} ج"),
+                QTableWidgetItem(f"{cost:.2f} ج"),
+                QTableWidgetItem(f"{profit:.2f} ج"),
+                QTableWidgetItem(f"{margin:.1f}%"),
+                QTableWidgetItem(f"{int(total_qty)} قطعة")
+            ]
+
+            for col, item in enumerate(items):
+                item.setBackground(bg_color)
+                if col >= 1:  # محاذاة الأرقام لليمين
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.category_table.setItem(row, col, item)
+
+        conn.close()
+
+        layout.addWidget(self.category_table)
+
+        # جدول تفصيلي بالأرباح حسب الفاتورة
         table_label = QLabel('📈 تفاصيل الأرباح حسب الفاتورة')
         table_label.setFont(QFont('Arial', 12, QFont.Bold))
+        table_label.setStyleSheet("margin-top: 10px;")
         layout.addWidget(table_label)
 
         self.profit_table = QTableWidget()

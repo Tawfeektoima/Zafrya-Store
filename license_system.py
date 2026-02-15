@@ -56,7 +56,7 @@ class LicenseSystem:
             print(f"Error getting HWID: {e}")
             return None
     
-        def generate_license_key(self, hwid, customer_name=""):
+    def generate_license_key(self, hwid, customer_name=""):
         """توليد مفتاح ترخيص لجهاز معين"""
         # المفتاح يعتمد فقط على HWID + المفتاح السري
         # عشان يكون ثابت في generate و validate
@@ -204,7 +204,6 @@ def test_system():
     print(f"✅ معرّف الجهاز: {hwid}\n")
     
     # 2. توليد مفتاح
-# 2. توليد مفتاح
     key = ls.generate_license_key(hwid)
     print(f"🔑 مفتاح الاختبار: {key}\n")
     

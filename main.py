@@ -271,7 +271,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tabs)
 
         central.setLayout(layout)
-        self.statusBar().showMessage('النظام جاهز ✅ | آخر تحديث: ' + datetime.now().strftime('%H:%M:%S'))
+        self.statusBar().showMessage('النضام جاهز ✅ | آخر تحديث: ' + datetime.now().strftime('%H:%M:%S'))
 
     def open_analytics(self):
         """فتح نافذة التحليلات بعد التحقق من كلمة المرور"""
@@ -496,7 +496,7 @@ class MainWindow(QMainWindow):
         return widget
 
     def create_products_tab(self):
-        """إدارة المنتجات"""
+        """إدارة المنتجات - مع زر النسخ"""
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -516,8 +516,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_layout)
 
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(9)
-        self.products_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'المقاس', 'الشركة', 'سعر الشراء', 'سعر البيع', 'المخزون', 'حذف'])
+        self.products_table.setColumnCount(10)  # عمود إضافي للنسخ
+        self.products_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'المقاس', 'الشركة', 'سعر الشراء', 'سعر البيع', 'المخزون', 'نسخ', 'حذف'])
         self.products_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         layout.addWidget(self.products_table)
 
@@ -620,7 +620,7 @@ class MainWindow(QMainWindow):
         conn.close()
 
     def load_products_table(self):
-        """تحميل جدول المنتجات"""
+        """تحميل جدول المنتجات - مع زر النسخ"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT product_id, product_code, product_name, category, size, manufacturer, purchase_price, selling_price, current_stock FROM products ORDER BY product_name")
@@ -633,10 +633,17 @@ class MainWindow(QMainWindow):
             for col, value in enumerate(row_data[1:], 0):
                 self.products_table.setItem(row, col, QTableWidgetItem(str(value or '')))
 
+            # زر النسخ
+            copy_btn = QPushButton('📋 نسخ')
+            copy_btn.clicked.connect(lambda checked, pid=row_data[0]: self.copy_product_dialog(pid))
+            copy_btn.setStyleSheet("background: #3498db; color: white; padding: 3px; font-weight: bold;")
+            self.products_table.setCellWidget(row, 8, copy_btn)
+
+            # زر الحذف
             del_btn = QPushButton('🗑️')
             del_btn.clicked.connect(lambda checked, pid=row_data[0]: self.delete_product(pid))
             del_btn.setStyleSheet("background: #e74c3c; color: white; padding: 3px;")
-            self.products_table.setCellWidget(row, 8, del_btn)
+            self.products_table.setCellWidget(row, 9, del_btn)
 
         conn.close()
 
@@ -814,10 +821,26 @@ class MainWindow(QMainWindow):
         finally:
             conn.close()
 
-    def add_product_dialog(self):
-        """حوار إضافة منتج"""
+    def copy_product_dialog(self, product_id):
+        """نسخ منتج موجود - فتح نافذة إضافة منتج مملوءة بالبيانات"""
+        # جلب بيانات المنتج المراد نسخه
+        conn = sqlite3.connect(self.db.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT product_code, product_name, category, size, manufacturer, purchase_price, selling_price, current_stock FROM products WHERE product_id = ?", (product_id,))
+        product_data = cursor.fetchone()
+        conn.close()
+
+        if not product_data:
+            QMessageBox.warning(self, 'خطأ', 'لم يتم العثور على المنتج!')
+            return
+
+        # فتح نافذة إضافة منتج مع البيانات المملوءة
+        self.add_product_dialog(copy_from=product_data)
+
+    def add_product_dialog(self, copy_from=None):
+        """حوار إضافة منتج - مع دعم النسخ"""
         dialog = QDialog(self)
-        dialog.setWindowTitle('إضافة منتج جديد')
+        dialog.setWindowTitle('📋 نسخ منتج' if copy_from else 'إضافة منتج جديد')
         dialog.setModal(True)
         dialog.setMinimumWidth(400)
 
@@ -853,6 +876,17 @@ class MainWindow(QMainWindow):
         stock_input.setMaximum(100000)
         stock_input.setSuffix(' قطعة')
 
+        # إذا كان نسخ، ملء البيانات
+        if copy_from:
+            # لا نملأ الكود لأنه يجب أن يكون فريد
+            name_input.setText(copy_from[1])
+            category_input.setCurrentText(copy_from[2])
+            size_input.setText(copy_from[3] or '')
+            manufacturer_input.setText(copy_from[4] or '')
+            purchase_price_input.setValue(copy_from[5])
+            selling_price_input.setValue(copy_from[6])
+            stock_input.setValue(0)  # نبدأ بصفر للمنتج الجديد
+
         layout.addRow('الكود *:', code_input)
         layout.addRow('الاسم *:', name_input)
         layout.addRow('الفئة *:', category_input)
@@ -861,6 +895,12 @@ class MainWindow(QMainWindow):
         layout.addRow('سعر الشراء *:', purchase_price_input)
         layout.addRow('سعر البيع *:', selling_price_input)
         layout.addRow('الكمية الأولية:', stock_input)
+
+        # ملاحظة للمستخدم
+        if copy_from:
+            note_label = QLabel('💡 تم نسخ بيانات المنتج. عدّل الكود والمقاس حسب الحاجة')
+            note_label.setStyleSheet("color: #27ae60; font-weight: bold;")
+            layout.addRow(note_label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(lambda: self.save_product(

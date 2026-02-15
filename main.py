@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QSpinBox, QDoubleSpinBox, QMessageBox, QTabWidget,
     QGroupBox, QFormLayout, QDialog, QDialogButtonBox, QHeaderView,
-    QTextEdit, QDateEdit, QCompleter, QInputDialog, QScrollArea
+    QTextEdit, QDateEdit, QCompleter, QInputDialog, QScrollArea, QAbstractItemView
 )
 from PyQt5.QtCore import Qt, QDate, QStringListModel
 from PyQt5.QtGui import QFont, QColor
@@ -575,6 +575,8 @@ class MainWindow(QMainWindow):
         self.low_stock_table.setColumnCount(6)
         self.low_stock_table.setHorizontalHeaderLabels(['الكود', 'اسم المنتج', 'الفئة', 'المخزون', 'الحد الأدنى', 'الحالة'])
         self.low_stock_table.horizontalHeader().setStretchLastSection(True)
+        # ✅ منع التعديل تماماً في لوحة التحكم
+        self.low_stock_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.dashboard_layout.addWidget(self.low_stock_table)
 
         refresh_btn = QPushButton('🔄 تحديث البيانات')
@@ -647,6 +649,8 @@ class MainWindow(QMainWindow):
         self.search_results_table.setColumnCount(7)
         self.search_results_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'السعر', 'المخزون', 'الكمية', 'إضافة'])
         self.search_results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # ✅ منع التعديل تماماً في نقطة البيع
+        self.search_results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         left_layout.addWidget(self.search_results_table)
 
         right_layout = QVBoxLayout()
@@ -659,6 +663,8 @@ class MainWindow(QMainWindow):
         self.cart_table.setColumnCount(6)
         self.cart_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'السعر', 'الكمية', 'الإجمالي', 'حذف'])
         self.cart_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # ✅ منع التعديل تماماً في السلة
+        self.cart_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         right_layout.addWidget(self.cart_table)
 
         total_layout = QHBoxLayout()
@@ -709,10 +715,18 @@ class MainWindow(QMainWindow):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
+        # رسالة تحذير
+        warning_label = QLabel('⚠️ ملاحظة: التعديل المباشر على الجدول غير مسموح للمنتجات الموجودة (استخدم زر النسخ أو الإضافة)')
+        warning_label.setStyleSheet("color: #e67e22; font-weight: bold; padding: 5px; background: #fff3cd; border-radius: 3px;")
+        layout.addWidget(warning_label)
+
         self.products_table = QTableWidget()
         self.products_table.setColumnCount(10)
         self.products_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'المقاس', 'الشركة', 'سعر الشراء', 'سعر البيع', 'المخزون', 'نسخ', 'حذف'])
         self.products_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # ✅ منع التعديل المباشر مع رسالة تأكيد
+        self.products_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        
         layout.addWidget(self.products_table)
 
         widget.setLayout(layout)
@@ -737,10 +751,17 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_layout)
 
+        # رسالة تحذير
+        warning_label = QLabel('🔒 جدول المخزون للعرض فقط - لا يمكن التعديل المباشر')
+        warning_label.setStyleSheet("color: #3498db; font-weight: bold; padding: 5px; background: #d1ecf1; border-radius: 3px;")
+        layout.addWidget(warning_label)
+
         self.inventory_table = QTableWidget()
         self.inventory_table.setColumnCount(7)
         self.inventory_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'سعر الشراء', 'سعر البيع', 'الكمية', 'القيمة'])
         self.inventory_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # ✅ منع التعديل تماماً في المخزون
+        self.inventory_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.inventory_table)
 
         widget.setLayout(layout)

@@ -1011,21 +1011,29 @@ class MainWindow(QMainWindow):
 
         self.add_product_dialog(copy_from=product_data)
 
-    def extract_size_from_code(self, code):
-        """استخراج الأرقام من الكود لاستخدامها كمقاس"""
-        # البحث عن أرقام في الكود
-        numbers = re.findall(r'\d+', code)
-        if numbers:
-            # إرجاع أول رقم موجود
-            return numbers[0]
-        return ''
+    def replace_numbers_in_text(self, text, old_number, new_number):
+        """استبدال رقم بآخر في النص"""
+        if not old_number or not new_number:
+            return text
+        # استبدال الرقم القديم بالجديد
+        return re.sub(r'\b' + re.escape(str(old_number)) + r'\b', str(new_number), text)
 
-    def on_code_changed(self, code_input, size_input):
-        """عند تغيير الكود، يتم تحديث المقاس تلقائياً"""
-        code = code_input.text()
-        extracted_size = self.extract_size_from_code(code)
-        if extracted_size:
-            size_input.setText(extracted_size)
+    def on_size_changed(self, size_input, code_input, name_input, original_size):
+        """عند تغيير المقاس، يتم تحديث الكود والاسم تلقائياً"""
+        new_size = size_input.text().strip()
+        
+        if not new_size or not original_size:
+            return
+        
+        # تحديث الكود
+        current_code = code_input.text()
+        new_code = self.replace_numbers_in_text(current_code, original_size, new_size)
+        code_input.setText(new_code)
+        
+        # تحديث الاسم
+        current_name = name_input.text()
+        new_name = self.replace_numbers_in_text(current_name, original_size, new_size)
+        name_input.setText(new_name)
 
     def add_product_dialog(self, copy_from=None):
         dialog = QDialog(self)
@@ -1065,19 +1073,26 @@ class MainWindow(QMainWindow):
         stock_input.setMaximum(100000)
         stock_input.setSuffix(' قطعة')
 
-        # ربط signal لتحديث المقاس عند تعديل الكود
-        code_input.textChanged.connect(lambda: self.on_code_changed(code_input, size_input))
-
+        # حفظ المقاس الأصلي
+        original_size = None
+        
         # إذا كان نسخ، املأ كل الحقول بما فيها الكود
         if copy_from:
             code_input.setText(copy_from[0])  # نسخ الكود أيضاً
             name_input.setText(copy_from[1])
             category_input.setCurrentText(copy_from[2])
-            size_input.setText(copy_from[3] or '')
+            original_size = copy_from[3] or ''
+            size_input.setText(original_size)
             manufacturer_input.setText(copy_from[4] or '')
             purchase_price_input.setValue(copy_from[5])
             selling_price_input.setValue(copy_from[6])
             stock_input.setValue(0)  # الكمية فقط تبدأ من 0
+
+        # ربط signal لتحديث الكود والاسم عند تعديل المقاس
+        if copy_from:
+            size_input.textChanged.connect(
+                lambda: self.on_size_changed(size_input, code_input, name_input, original_size)
+            )
 
         layout.addRow('الكود *:', code_input)
         layout.addRow('الاسم *:', name_input)
@@ -1089,7 +1104,7 @@ class MainWindow(QMainWindow):
         layout.addRow('الكمية الأولية:', stock_input)
 
         if copy_from:
-            note_label = QLabel('💡 تم نسخ كل البيانات. عدّل الكود وسيتحدث المقاس تلقائياً\nمثال: ش42DC → ش55DC (المقاس يصبح 55)')
+            note_label = QLabel('💡 تم نسخ كل البيانات. غيّر المقاس وسيتحدث الكود والاسم تلقائياً\nمثال: مقاس 42 → 55 (الكود والاسم يتحدثان تلقائياً)')
             note_label.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 11px;")
             layout.addRow(note_label)
 

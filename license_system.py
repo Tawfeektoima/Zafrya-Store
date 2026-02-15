@@ -202,7 +202,8 @@ def test_system():
     print(f"✅ معرّف الجهاز: {hwid}\n")
     
     # 2. توليد مفتاح
-    key = ls.generate_license_key(hwid, "اختبار")
+# 2. توليد مفتاح
+    key = ls.generate_license_key(hwid)
     print(f"🔑 مفتاح الاختبار: {key}\n")
     
     # 3. التحقق من المفتاح

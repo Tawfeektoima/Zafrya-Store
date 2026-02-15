@@ -100,10 +100,10 @@ class MainWindow(QMainWindow):
         from PyQt5.QtCore import QTimer
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.refresh_dashboard)
-        self.refresh_timer.start(5000)  # كل 5 ثواني
+        self.refresh_timer.start(3000)  # كل 5 ثواني
 
     def init_ui(self):
-        self.setWindowTitle('نظام إدارة محل زفرية - النسخة المحدثة')
+        self.setWindowTitle('نظام إدارة محل الظافرية')
         self.setGeometry(50, 50, 1400, 800)
 
         central = QWidget()
@@ -112,7 +112,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
 
         # العنوان
-        title = QLabel('🏪 نظام إدارة محل زفرية')
+        title = QLabel('🏪 نظام إدارة محل ظافرية')
         title.setFont(QFont('Arial', 22, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: #2c3e50; padding: 15px; background: #ecf0f1;")

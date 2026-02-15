@@ -10,7 +10,7 @@ import sqlite3
 import hashlib
 import smtplib
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from PyQt5.QtWidgets import (
@@ -18,10 +18,18 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QSpinBox, QDoubleSpinBox, QMessageBox, QTabWidget,
     QGroupBox, QFormLayout, QDialog, QDialogButtonBox, QHeaderView,
-    QTextEdit, QDateEdit, QCompleter, QInputDialog
+    QTextEdit, QDateEdit, QCompleter, QInputDialog, QScrollArea
 )
 from PyQt5.QtCore import Qt, QDate, QStringListModel
 from PyQt5.QtGui import QFont, QColor
+
+# Matplotlib imports
+import matplotlib
+matplotlib.use('Qt5Agg')
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.font_manager as fm
 
 class Database:
     """إدارة قاعدة البيانات"""
@@ -113,18 +121,18 @@ class AnalyticsProfitDialog(QDialog):
         super().__init__(parent)
         self.db_path = db_path
         self.setWindowTitle('📊 Analytics & Profits - تحليلات الأرباح')
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1200, 900)
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
 
         # العنوان
         title = QLabel('📊 تحليلات الأرباح التفصيلية')
         title.setFont(QFont('Arial', 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: #2c3e50; padding: 15px; background: #ecf0f1;")
-        layout.addWidget(title)
+        main_layout.addWidget(title)
 
         # بطاقات الأرباح
         stats_layout = QHBoxLayout()
@@ -155,9 +163,38 @@ class AnalyticsProfitDialog(QDialog):
         stats_layout.addWidget(self.create_profit_card('إجمالي الأرباح', f'{total_profit:.2f} ج', '#f39c12'))
         stats_layout.addWidget(self.create_profit_card('أرباح متوقعة', f'{expected_profit:.2f} ج', '#9b59b6'))
 
-        layout.addLayout(stats_layout)
+        main_layout.addLayout(stats_layout)
 
-        # === جدول تحليل الأقسام الجديد ===
+        # === Scroll Area للرسومات والجداول ===
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+
+        # === الرسومات البيانية ===
+        charts_label = QLabel('📈 الرسومات البيانية')
+        charts_label.setFont(QFont('Arial', 14, QFont.Bold))
+        charts_label.setStyleSheet("color: #2c3e50; margin-top: 10px;")
+        layout.addWidget(charts_label)
+
+        # Charts container
+        charts_layout = QHBoxLayout()
+        
+        # Bar Chart - الأرباح حسب الأقسام
+        self.bar_chart = self.create_profit_bar_chart()
+        charts_layout.addWidget(self.bar_chart)
+
+        # Pie Chart - توزيع المبيعات
+        self.pie_chart = self.create_sales_pie_chart()
+        charts_layout.addWidget(self.pie_chart)
+
+        layout.addLayout(charts_layout)
+
+        # Line Chart - اتجاه المبيعات
+        self.line_chart = self.create_sales_trend_chart()
+        layout.addWidget(self.line_chart)
+
+        # === جدول تحليل الأقسام ===
         category_label = QLabel('📂 تحليل العوائد والتكاليف حسب الأقسام')
         category_label.setFont(QFont('Arial', 12, QFont.Bold))
         category_label.setStyleSheet("color: #2c3e50; margin-top: 10px;")
@@ -172,7 +209,6 @@ class AnalyticsProfitDialog(QDialog):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # استعلام لحساب العوائد والتكاليف والأرباح لكل فئة
         cursor.execute("""
             SELECT 
                 p.category,
@@ -198,13 +234,12 @@ class AnalyticsProfitDialog(QDialog):
             total_qty = row_data[4]
             margin = (profit / revenue * 100) if revenue > 0 else 0
 
-            # تلوين حسب هامش الربح
             if margin >= 30:
-                bg_color = QColor(200, 255, 200)  # أخضر فاتح
+                bg_color = QColor(200, 255, 200)
             elif margin >= 20:
-                bg_color = QColor(255, 255, 200)  # أصفر فاتح
+                bg_color = QColor(255, 255, 200)
             else:
-                bg_color = QColor(255, 230, 230)  # أحمر فاتح
+                bg_color = QColor(255, 230, 230)
 
             items = [
                 QTableWidgetItem(category),
@@ -217,12 +252,11 @@ class AnalyticsProfitDialog(QDialog):
 
             for col, item in enumerate(items):
                 item.setBackground(bg_color)
-                if col >= 1:  # محاذاة الأرقام لليمين
+                if col >= 1:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.category_table.setItem(row, col, item)
 
         conn.close()
-
         layout.addWidget(self.category_table)
 
         # جدول تفصيلي بالأرباح حسب الفاتورة
@@ -235,6 +269,7 @@ class AnalyticsProfitDialog(QDialog):
         self.profit_table.setColumnCount(5)
         self.profit_table.setHorizontalHeaderLabels(['رقم الفاتورة', 'التاريخ', 'الإجمالي', 'الربح', 'هامش الربح %'])
         self.profit_table.horizontalHeader().setStretchLastSection(True)
+        self.profit_table.setMaximumHeight(250)
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -253,16 +288,145 @@ class AnalyticsProfitDialog(QDialog):
             self.profit_table.setItem(row, 4, QTableWidgetItem(f"{margin:.1f}%"))
 
         conn.close()
-
         layout.addWidget(self.profit_table)
+
+        scroll.setWidget(scroll_content)
+        main_layout.addWidget(scroll)
 
         # زر الإغلاق
         close_btn = QPushButton('إغلاق')
         close_btn.clicked.connect(self.accept)
         close_btn.setStyleSheet("background: #e74c3c; color: white; padding: 10px; font-size: 14px;")
-        layout.addWidget(close_btn)
+        main_layout.addWidget(close_btn)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
+
+    def create_profit_bar_chart(self):
+        """إنشاء Bar Chart للأرباح حسب الأقسام"""
+        fig = Figure(figsize=(6, 4), dpi=100)
+        ax = fig.add_subplot(111)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.category, SUM(si.item_profit) as profit
+            FROM sale_items si
+            JOIN products p ON si.product_id = p.product_id
+            GROUP BY p.category
+            ORDER BY profit DESC
+        """)
+        
+        data = cursor.fetchall()
+        conn.close()
+
+        if data:
+            categories = [row[0] for row in data]
+            profits = [row[1] for row in data]
+
+            colors = ['#27ae60', '#16a085', '#f39c12', '#e74c3c', '#9b59b6']
+            bars = ax.bar(range(len(categories)), profits, color=colors[:len(categories)])
+            ax.set_xticks(range(len(categories)))
+            ax.set_xticklabels(categories, rotation=0, ha='center')
+            ax.set_ylabel('Profit (EGP)', fontweight='bold')
+            ax.set_title('Profit by Category', fontweight='bold', fontsize=12)
+            ax.grid(axis='y', alpha=0.3)
+
+            # إضافة القيم فوق الأعمدة
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{height:.0f}',
+                       ha='center', va='bottom', fontsize=9, fontweight='bold')
+        else:
+            ax.text(0.5, 0.5, 'No data available', ha='center', va='center', transform=ax.transAxes)
+
+        fig.tight_layout()
+        canvas = FigureCanvas(fig)
+        return canvas
+
+    def create_sales_pie_chart(self):
+        """إنشاء Pie Chart لتوزيع المبيعات"""
+        fig = Figure(figsize=(6, 4), dpi=100)
+        ax = fig.add_subplot(111)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.category, SUM(si.subtotal) as revenue
+            FROM sale_items si
+            JOIN products p ON si.product_id = p.product_id
+            GROUP BY p.category
+            ORDER BY revenue DESC
+        """)
+        
+        data = cursor.fetchall()
+        conn.close()
+
+        if data:
+            categories = [row[0] for row in data]
+            revenues = [row[1] for row in data]
+
+            colors = ['#27ae60', '#16a085', '#f39c12', '#e74c3c', '#9b59b6']
+            wedges, texts, autotexts = ax.pie(revenues, labels=categories, autopct='%1.1f%%',
+                                               colors=colors[:len(categories)],
+                                               startangle=90)
+            
+            for autotext in autotexts:
+                autotext.set_color('white')
+                autotext.set_fontweight('bold')
+                autotext.set_fontsize(9)
+
+            ax.set_title('Sales Distribution by Category', fontweight='bold', fontsize=12)
+        else:
+            ax.text(0.5, 0.5, 'No data available', ha='center', va='center', transform=ax.transAxes)
+
+        fig.tight_layout()
+        canvas = FigureCanvas(fig)
+        return canvas
+
+    def create_sales_trend_chart(self):
+        """إنشاء Line Chart لاتجاه المبيعات"""
+        fig = Figure(figsize=(12, 4), dpi=100)
+        ax = fig.add_subplot(111)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # بيانات آخر 7 أيام
+        cursor.execute("""
+            SELECT DATE(sale_date) as sale_day, 
+                   SUM(total_amount) as daily_sales,
+                   SUM(total_profit) as daily_profit
+            FROM sales
+            WHERE DATE(sale_date) >= DATE('now', '-7 days')
+            GROUP BY DATE(sale_date)
+            ORDER BY sale_day
+        """)
+        
+        data = cursor.fetchall()
+        conn.close()
+
+        if data and len(data) > 1:
+            days = [row[0] for row in data]
+            sales = [row[1] for row in data]
+            profits = [row[2] for row in data]
+
+            ax.plot(days, sales, marker='o', linewidth=2, color='#3498db', label='Sales')
+            ax.plot(days, profits, marker='s', linewidth=2, color='#27ae60', label='Profit')
+            
+            ax.set_xlabel('Date', fontweight='bold')
+            ax.set_ylabel('Amount (EGP)', fontweight='bold')
+            ax.set_title('Sales & Profit Trend (Last 7 Days)', fontweight='bold', fontsize=12)
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.tick_params(axis='x', rotation=45)
+        else:
+            ax.text(0.5, 0.5, 'Not enough data (need at least 2 days)', 
+                   ha='center', va='center', transform=ax.transAxes)
+
+        fig.tight_layout()
+        canvas = FigureCanvas(fig)
+        return canvas
 
     def create_profit_card(self, title, value, color):
         """إنشاء بطاقة ربح"""
@@ -287,7 +451,6 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.load_data()
 
-        # تحديث لوحة التحكم تلقائياً كل 5 ثواني
         from PyQt5.QtCore import QTimer
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.refresh_dashboard)
@@ -302,7 +465,6 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
 
-        # العنوان
         header_layout = QHBoxLayout()
         
         title = QLabel('🏪 نظام إدارة محل الظافرية')
@@ -311,14 +473,12 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("color: #2c3e50; padding: 15px; background: #ecf0f1;")
         header_layout.addWidget(title)
 
-        # أيقونة Analytics
         analytics_btn = QPushButton('📊 Analytics')
         analytics_btn.setStyleSheet("background: #9b59b6; color: white; padding: 10px; font-size: 12px; font-weight: bold;")
         analytics_btn.clicked.connect(self.open_analytics)
         analytics_btn.setFixedWidth(120)
         header_layout.addWidget(analytics_btn)
 
-        # أيقونة تغيير كلمة المرور
         password_btn = QPushButton('🔐 تغيير كلمة المرور')
         password_btn.setStyleSheet("background: #e67e22; color: white; padding: 10px; font-size: 12px; font-weight: bold;")
         password_btn.clicked.connect(self.change_password_dialog)
@@ -327,7 +487,6 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(header_layout)
 
-        # التبويبات
         self.tabs = QTabWidget()
         self.tabs.setFont(QFont('Arial', 11))
 
@@ -343,7 +502,6 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('النضام جاهز ✅ | آخر تحديث: ' + datetime.now().strftime('%H:%M:%S'))
 
     def open_analytics(self):
-        """فتح نافذة التحليلات بعد التحقق من كلمة المرور"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT setting_value FROM system_settings WHERE setting_key = 'analytics_password'")
@@ -361,47 +519,37 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, 'خطأ', '❌ كلمة المرور غير صحيحة!')
 
     def change_password_dialog(self):
-        """تغيير كلمة المرور عبر التحقق بالبريد الإلكتروني"""
-        # الحصول على البريد الإلكتروني
         email, ok = QInputDialog.getText(self, 'تأكيد الهوية', 'أدخل بريدك الإلكتروني:')
         
         if not ok or not email:
             return
 
-        # التحقق من صحة البريد الإلكتروني (تحقق بسيط)
         if '@' not in email or '.' not in email:
             QMessageBox.warning(self, 'خطأ', 'البريد الإلكتروني غير صحيح!')
             return
 
-        # توليد رمز تحقق عشوائي
         verification_code = str(random.randint(100000, 999999))
-
-        # محاكاة إرسال البريد (في التطبيق الحقيقي، استخدم SMTP)
         QMessageBox.information(self, 'رمز التحقق', 
                                f'تم إرسال رمز التحقق إلى {email}\n\nرمز التحقق (للاختبار): {verification_code}\n\nملاحظة: في الإصدار الحقيقي، سيتم إرسال الرمز عبر البريد الإلكتروني.')
 
-        # طلب الرمز من المستخدم
         entered_code, ok = QInputDialog.getText(self, 'رمز التحقق', 'أدخل رمز التحقق المرسل:')
 
         if not ok or entered_code != verification_code:
             QMessageBox.warning(self, 'خطأ', '❌ رمز التحقق غير صحيح!')
             return
 
-        # طلب كلمة المرور الجديدة
         new_password, ok = QInputDialog.getText(self, 'كلمة المرور الجديدة', 'أدخل كلمة المرور الجديدة:', QLineEdit.Password)
 
         if not ok or not new_password or len(new_password) < 6:
             QMessageBox.warning(self, 'خطأ', 'كلمة المرور يجب أن تكون 6 أحرف على الأقل!')
             return
 
-        # تأكيد كلمة المرور
         confirm_password, ok = QInputDialog.getText(self, 'تأكيد كلمة المرور', 'أعد إدخال كلمة المرور:', QLineEdit.Password)
 
         if not ok or new_password != confirm_password:
             QMessageBox.warning(self, 'خطأ', '❌ كلمتا المرور غير متطابقتين!')
             return
 
-        # حفظ كلمة المرور الجديدة
         hashed_password = hashlib.sha256(new_password.encode()).hexdigest()
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
@@ -412,15 +560,12 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, 'نجح ✅', 'تم تغيير كلمة المرور بنجاح!')
 
     def create_dashboard_tab(self):
-        """لوحة التحكم - بدون الأرباح"""
         widget = QWidget()
         self.dashboard_layout = QVBoxLayout()
 
-        # سيتم ملء المحتوى في refresh_dashboard
         self.dashboard_stats_layout = QHBoxLayout()
         self.dashboard_layout.addLayout(self.dashboard_stats_layout)
 
-        # جدول المنتجات المنخفضة
         low_stock_label = QLabel('⚠️ تنبيهات المخزون المنخفض')
         low_stock_label.setFont(QFont('Arial', 14, QFont.Bold))
         self.dashboard_layout.addWidget(low_stock_label)
@@ -431,7 +576,6 @@ class MainWindow(QMainWindow):
         self.low_stock_table.horizontalHeader().setStretchLastSection(True)
         self.dashboard_layout.addWidget(self.low_stock_table)
 
-        # زر التحديث اليدوي
         refresh_btn = QPushButton('🔄 تحديث البيانات')
         refresh_btn.clicked.connect(self.refresh_dashboard)
         refresh_btn.setStyleSheet("background: #3498db; color: white; padding: 10px; font-size: 14px;")
@@ -441,8 +585,6 @@ class MainWindow(QMainWindow):
         return widget
 
     def refresh_dashboard(self):
-        """تحديث لوحة التحكم - بدون عرض الأرباح"""
-        # مسح البطاقات القديمة
         while self.dashboard_stats_layout.count():
             child = self.dashboard_stats_layout.takeAt(0)
             if child.widget():
@@ -451,34 +593,26 @@ class MainWindow(QMainWindow):
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
 
-        # عدد الفواتير اليوم
         cursor.execute("SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM sales WHERE DATE(sale_date) = DATE('now')")
         sales_count, total_sales = cursor.fetchone()
 
-        # قيمة المخزون
         cursor.execute("SELECT COALESCE(SUM(current_stock * purchase_price), 0) FROM products")
         inventory_value = cursor.fetchone()[0]
 
-        # عدد المنتجات المنخفضة
         cursor.execute("SELECT COUNT(*) FROM products WHERE current_stock <= min_stock_alert")
         low_stock = cursor.fetchone()[0]
 
         conn.close()
 
-        # إضافة البطاقات الجديدة (بدون الأرباح)
         self.dashboard_stats_layout.addWidget(self.create_stat_card('عدد الفواتير اليوم', str(sales_count), '#3498db'))
         self.dashboard_stats_layout.addWidget(self.create_stat_card('إجمالي المبيعات', f'{total_sales:.2f} ج', '#2ecc71'))
         self.dashboard_stats_layout.addWidget(self.create_stat_card('قيمة المخزون', f'{inventory_value:.2f} ج', '#9b59b6'))
         self.dashboard_stats_layout.addWidget(self.create_stat_card('تنبيهات المخزون', str(low_stock), '#e74c3c'))
 
-        # تحديث جدول المنتجات المنخفضة
         self.load_low_stock_table()
-
-        # تحديث شريط الحالة
         self.statusBar().showMessage('✅ تم التحديث | الوقت: ' + datetime.now().strftime('%H:%M:%S'))
 
     def create_stat_card(self, title, value, color):
-        """إنشاء بطاقة إحصائية"""
         group = QGroupBox(title)
         group.setStyleSheet(f"QGroupBox {{ font-weight: bold; background: {color}; color: white; padding: 10px; border-radius: 5px; }}")
         layout = QVBoxLayout()
@@ -493,11 +627,9 @@ class MainWindow(QMainWindow):
         return group
 
     def create_pos_tab(self):
-        """نقطة البيع مع بحث تلقائي"""
         widget = QWidget()
         main_layout = QHBoxLayout()
 
-        # الجانب الأيسر - البحث والمنتجات
         left_layout = QVBoxLayout()
 
         search_layout = QHBoxLayout()
@@ -505,22 +637,17 @@ class MainWindow(QMainWindow):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText('اكتب للبحث التلقائي (مثل: DC, دفتر, شبشب)...')
-
-        # إضافة البحث التلقائي
         self.search_input.textChanged.connect(self.live_search_products)
-
         search_layout.addWidget(self.search_input)
 
         left_layout.addLayout(search_layout)
 
-        # جدول نتائج البحث
         self.search_results_table = QTableWidget()
         self.search_results_table.setColumnCount(7)
         self.search_results_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'السعر', 'المخزون', 'الكمية', 'إضافة'])
         self.search_results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         left_layout.addWidget(self.search_results_table)
 
-        # الجانب الأيمن - السلة
         right_layout = QVBoxLayout()
 
         cart_label = QLabel('🛒 سلة المشتريات')
@@ -533,7 +660,6 @@ class MainWindow(QMainWindow):
         self.cart_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         right_layout.addWidget(self.cart_table)
 
-        # الإجمالي
         total_layout = QHBoxLayout()
         total_layout.addWidget(QLabel('الإجمالي:'))
         self.total_label = QLabel('0.00 جنيه')
@@ -543,7 +669,6 @@ class MainWindow(QMainWindow):
         total_layout.addStretch()
         right_layout.addLayout(total_layout)
 
-        # الأزرار
         btn_layout = QHBoxLayout()
 
         complete_btn = QPushButton('✅ إتمام البيع')
@@ -565,7 +690,6 @@ class MainWindow(QMainWindow):
         return widget
 
     def create_products_tab(self):
-        """إدارة المنتجات - مع زر النسخ"""
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -585,7 +709,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_layout)
 
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(10)  # عمود إضافي للنسخ
+        self.products_table.setColumnCount(10)
         self.products_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'المقاس', 'الشركة', 'سعر الشراء', 'سعر البيع', 'المخزون', 'نسخ', 'حذف'])
         self.products_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         layout.addWidget(self.products_table)
@@ -594,7 +718,6 @@ class MainWindow(QMainWindow):
         return widget
 
     def create_inventory_tab(self):
-        """المخزون"""
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -623,7 +746,6 @@ class MainWindow(QMainWindow):
         return widget
 
     def create_reports_tab(self):
-        """التقارير المحسنة"""
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -650,19 +772,16 @@ class MainWindow(QMainWindow):
         return widget
 
     def load_data(self):
-        """تحميل جميع البيانات"""
         self.refresh_dashboard()
         self.load_products_table()
         self.load_inventory_table()
         self.generate_daily_report()
 
     def load_all_data(self):
-        """تحديث جميع الصفحات"""
         self.load_data()
         QMessageBox.information(self, 'تم التحديث', 'تم تحديث جميع البيانات بنجاح ✅')
 
     def load_low_stock_table(self):
-        """تحميل جدول المنتجات المنخفضة"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT product_code, product_name, category, current_stock, min_stock_alert FROM products WHERE current_stock <= min_stock_alert ORDER BY current_stock ASC")
@@ -689,7 +808,6 @@ class MainWindow(QMainWindow):
         conn.close()
 
     def load_products_table(self):
-        """تحميل جدول المنتجات - مع زر النسخ"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT product_id, product_code, product_name, category, size, manufacturer, purchase_price, selling_price, current_stock FROM products ORDER BY product_name")
@@ -702,13 +820,11 @@ class MainWindow(QMainWindow):
             for col, value in enumerate(row_data[1:], 0):
                 self.products_table.setItem(row, col, QTableWidgetItem(str(value or '')))
 
-            # زر النسخ
             copy_btn = QPushButton('📋 نسخ')
             copy_btn.clicked.connect(lambda checked, pid=row_data[0]: self.copy_product_dialog(pid))
             copy_btn.setStyleSheet("background: #3498db; color: white; padding: 3px; font-weight: bold;")
             self.products_table.setCellWidget(row, 8, copy_btn)
 
-            # زر الحذف
             del_btn = QPushButton('🗑️')
             del_btn.clicked.connect(lambda checked, pid=row_data[0]: self.delete_product(pid))
             del_btn.setStyleSheet("background: #e74c3c; color: white; padding: 3px;")
@@ -717,7 +833,6 @@ class MainWindow(QMainWindow):
         conn.close()
 
     def load_inventory_table(self):
-        """تحميل جدول المخزون"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT product_code, product_name, category, purchase_price, selling_price, current_stock FROM products ORDER BY category, product_name")
@@ -736,7 +851,6 @@ class MainWindow(QMainWindow):
         conn.close()
 
     def live_search_products(self):
-        """البحث التلقائي المباشر"""
         search_term = self.search_input.text().strip()
 
         if len(search_term) < 1:
@@ -747,7 +861,6 @@ class MainWindow(QMainWindow):
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # بحث شامل في الكود، الاسم، الفئة، والشركة
         cursor.execute("""
             SELECT * FROM products 
             WHERE product_code LIKE ? 
@@ -784,7 +897,6 @@ class MainWindow(QMainWindow):
         conn.close()
 
     def add_to_cart(self, product, quantity):
-        """إضافة منتج للسلة"""
         if quantity > product['current_stock']:
             QMessageBox.warning(self, 'تحذير', 'الكمية المطلوبة أكبر من المخزون!')
             return
@@ -808,7 +920,6 @@ class MainWindow(QMainWindow):
         self.search_input.clear()
 
     def refresh_cart(self):
-        """تحديث السلة"""
         self.cart_table.setRowCount(0)
         total = 0
 
@@ -833,17 +944,14 @@ class MainWindow(QMainWindow):
         self.total_label.setText(f'{total:.2f} جنيه')
 
     def remove_from_cart(self, index):
-        """حذف من السلة"""
         del self.cart_items[index]
         self.refresh_cart()
 
     def clear_cart(self):
-        """مسح السلة"""
         self.cart_items = []
         self.refresh_cart()
 
     def complete_sale(self):
-        """إتمام عملية البيع - بدون عرض الأرباح"""
         if not self.cart_items:
             QMessageBox.warning(self, 'تحذير', 'السلة فارغة!')
             return
@@ -874,7 +982,6 @@ class MainWindow(QMainWindow):
 
             conn.commit()
 
-            # رسالة بدون ذكر الأرباح
             QMessageBox.information(self, 'نجح ✅', 
                                   f'تمت عملية البيع بنجاح!\n\n'
                                   f'رقم الفاتورة: {sale_id}\n'
@@ -882,7 +989,7 @@ class MainWindow(QMainWindow):
 
             self.cart_items = []
             self.refresh_cart()
-            self.load_data()  # تحديث كل البيانات
+            self.load_data()
 
         except Exception as e:
             conn.rollback()
@@ -891,8 +998,6 @@ class MainWindow(QMainWindow):
             conn.close()
 
     def copy_product_dialog(self, product_id):
-        """نسخ منتج موجود - فتح نافذة إضافة منتج مملوءة بالبيانات"""
-        # جلب بيانات المنتج المراد نسخه
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT product_code, product_name, category, size, manufacturer, purchase_price, selling_price, current_stock FROM products WHERE product_id = ?", (product_id,))
@@ -903,11 +1008,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'خطأ', 'لم يتم العثور على المنتج!')
             return
 
-        # فتح نافذة إضافة منتج مع البيانات المملوءة
         self.add_product_dialog(copy_from=product_data)
 
     def add_product_dialog(self, copy_from=None):
-        """حوار إضافة منتج - مع دعم النسخ"""
         dialog = QDialog(self)
         dialog.setWindowTitle('📋 نسخ منتج' if copy_from else 'إضافة منتج جديد')
         dialog.setModal(True)
@@ -945,16 +1048,14 @@ class MainWindow(QMainWindow):
         stock_input.setMaximum(100000)
         stock_input.setSuffix(' قطعة')
 
-        # إذا كان نسخ، ملء البيانات
         if copy_from:
-            # لا نملأ الكود لأنه يجب أن يكون فريد
             name_input.setText(copy_from[1])
             category_input.setCurrentText(copy_from[2])
             size_input.setText(copy_from[3] or '')
             manufacturer_input.setText(copy_from[4] or '')
             purchase_price_input.setValue(copy_from[5])
             selling_price_input.setValue(copy_from[6])
-            stock_input.setValue(0)  # نبدأ بصفر للمنتج الجديد
+            stock_input.setValue(0)
 
         layout.addRow('الكود *:', code_input)
         layout.addRow('الاسم *:', name_input)
@@ -965,7 +1066,6 @@ class MainWindow(QMainWindow):
         layout.addRow('سعر البيع *:', selling_price_input)
         layout.addRow('الكمية الأولية:', stock_input)
 
-        # ملاحظة للمستخدم
         if copy_from:
             note_label = QLabel('💡 تم نسخ بيانات المنتج. عدّل الكود والمقاس حسب الحاجة')
             note_label.setStyleSheet("color: #27ae60; font-weight: bold;")
@@ -985,7 +1085,6 @@ class MainWindow(QMainWindow):
         dialog.exec_()
 
     def save_product(self, code, name, category, size, manufacturer, purchase_price, selling_price, stock, dialog):
-        """حفظ منتج جديد"""
         if not code or not name:
             QMessageBox.warning(self, 'خطأ', 'الكود والاسم مطلوبان!')
             return
@@ -1008,7 +1107,6 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, 'نجح ✅', f'تم إضافة المنتج "{name}" بنجاح!')
             dialog.accept()
 
-            # تحديث جميع الجداول
             self.load_products_table()
             self.load_inventory_table()
             self.refresh_dashboard()
@@ -1021,7 +1119,6 @@ class MainWindow(QMainWindow):
             conn.close()
 
     def delete_product(self, product_id):
-        """حذف منتج"""
         reply = QMessageBox.question(self, 'تأكيد الحذف', 
                                     'هل تريد حذف هذا المنتج نهائياً؟\nلا يمكن التراجع عن هذه العملية!',
                                     QMessageBox.Yes | QMessageBox.No)
@@ -1039,18 +1136,15 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, 'تم الحذف', 'تم حذف المنتج بنجاح ✅')
 
     def generate_daily_report(self):
-        """إنشاء تقرير يومي محسّن"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
 
-        # إحصائيات اليوم
         cursor.execute("""
             SELECT COUNT(*), COALESCE(SUM(total_amount), 0), COALESCE(SUM(total_profit), 0)
             FROM sales WHERE DATE(sale_date) = DATE('now')
         """)
         sales_count, total_sales, total_profit = cursor.fetchone()
 
-        # أفضل المنتجات
         cursor.execute("""
             SELECT si.product_name, si.product_code, SUM(si.quantity) as qty, 
                    SUM(si.subtotal) as revenue, SUM(si.item_profit) as profit
@@ -1063,7 +1157,6 @@ class MainWindow(QMainWindow):
         """)
         best_sellers = cursor.fetchall()
 
-        # آخر 5 فواتير
         cursor.execute("""
             SELECT sale_id, sale_date, total_amount
             FROM sales
@@ -1073,7 +1166,6 @@ class MainWindow(QMainWindow):
         """)
         recent_sales = cursor.fetchall()
 
-        # إحصائيات المخزون
         cursor.execute("SELECT COUNT(*), SUM(current_stock), SUM(current_stock * purchase_price) FROM products")
         product_count, total_qty, inventory_value = cursor.fetchone()
 
@@ -1082,7 +1174,6 @@ class MainWindow(QMainWindow):
 
         conn.close()
 
-        # تنسيق التقرير المحسّن (بدون الأرباح)
         report = f"""
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                     📊 تقرير مبيعات اليوم                          ║

@@ -1018,23 +1018,6 @@ class MainWindow(QMainWindow):
         # استبدال الرقم القديم بالجديد
         return re.sub(r'\b' + re.escape(str(old_number)) + r'\b', str(new_number), text)
 
-    def on_size_changed(self, size_input, code_input, name_input, original_size):
-        """عند تغيير المقاس، يتم تحديث الكود والاسم تلقائياً"""
-        new_size = size_input.text().strip()
-        
-        if not new_size or not original_size:
-            return
-        
-        # تحديث الكود
-        current_code = code_input.text()
-        new_code = self.replace_numbers_in_text(current_code, original_size, new_size)
-        code_input.setText(new_code)
-        
-        # تحديث الاسم
-        current_name = name_input.text()
-        new_name = self.replace_numbers_in_text(current_name, original_size, new_size)
-        name_input.setText(new_name)
-
     def add_product_dialog(self, copy_from=None):
         dialog = QDialog(self)
         dialog.setWindowTitle('📋 نسخ منتج' if copy_from else 'إضافة منتج جديد')
@@ -1073,26 +1056,44 @@ class MainWindow(QMainWindow):
         stock_input.setMaximum(100000)
         stock_input.setSuffix(' قطعة')
 
-        # حفظ المقاس الأصلي
-        original_size = None
+        # حفظ المقاس الأصلي في dialog attribute
+        dialog.last_size = ''
         
         # إذا كان نسخ، املأ كل الحقول بما فيها الكود
         if copy_from:
-            code_input.setText(copy_from[0])  # نسخ الكود أيضاً
+            code_input.setText(copy_from[0])
             name_input.setText(copy_from[1])
             category_input.setCurrentText(copy_from[2])
-            original_size = copy_from[3] or ''
-            size_input.setText(original_size)
+            dialog.last_size = copy_from[3] or ''
+            size_input.setText(dialog.last_size)
             manufacturer_input.setText(copy_from[4] or '')
             purchase_price_input.setValue(copy_from[5])
             selling_price_input.setValue(copy_from[6])
-            stock_input.setValue(0)  # الكمية فقط تبدأ من 0
+            stock_input.setValue(0)
 
-        # ربط signal لتحديث الكود والاسم عند تعديل المقاس
-        if copy_from:
-            size_input.textChanged.connect(
-                lambda: self.on_size_changed(size_input, code_input, name_input, original_size)
-            )
+            # Function للتحديث التلقائي
+            def on_size_text_changed():
+                new_size = size_input.text().strip()
+                old_size = dialog.last_size
+                
+                if not old_size or not new_size or old_size == new_size:
+                    return
+                
+                # تحديث الكود
+                current_code = code_input.text()
+                new_code = self.replace_numbers_in_text(current_code, old_size, new_size)
+                code_input.setText(new_code)
+                
+                # تحديث الاسم
+                current_name = name_input.text()
+                new_name = self.replace_numbers_in_text(current_name, old_size, new_size)
+                name_input.setText(new_name)
+                
+                # حفظ المقاس الجديد
+                dialog.last_size = new_size
+            
+            # ربط signal
+            size_input.textChanged.connect(on_size_text_changed)
 
         layout.addRow('الكود *:', code_input)
         layout.addRow('الاسم *:', name_input)
@@ -1104,8 +1105,8 @@ class MainWindow(QMainWindow):
         layout.addRow('الكمية الأولية:', stock_input)
 
         if copy_from:
-            note_label = QLabel('💡 تم نسخ كل البيانات. غيّر المقاس وسيتحدث الكود والاسم تلقائياً\nمثال: مقاس 42 → 55 (الكود والاسم يتحدثان تلقائياً)')
-            note_label.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 11px;")
+            note_label = QLabel('💡 غيّر المقاس وستتحدث بقية الحقول تلقائياً\nمثال: 42 → 55 يحدث الكود والاسم فوراً ⚡')
+            note_label.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 11px; padding: 10px; background: #d5f4e6; border-radius: 5px;")
             layout.addRow(note_label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

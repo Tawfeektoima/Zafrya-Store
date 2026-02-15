@@ -651,6 +651,13 @@ class MainWindow(QMainWindow):
         self.search_results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         # ✅ منع التعديل تماماً في نقطة البيع
         self.search_results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # ✨ إضافة Hover Effect
+        self.search_results_table.setStyleSheet("""
+            QTableWidget::item:hover {
+                background-color: #e3f2fd;
+                border: 1px solid #2196f3;
+            }
+        """)
         left_layout.addWidget(self.search_results_table)
 
         right_layout = QVBoxLayout()
@@ -665,6 +672,13 @@ class MainWindow(QMainWindow):
         self.cart_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         # ✅ منع التعديل تماماً في السلة
         self.cart_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # ✨ إضافة Hover Effect
+        self.cart_table.setStyleSheet("""
+            QTableWidget::item:hover {
+                background-color: #fff3e0;
+                border: 1px solid #ff9800;
+            }
+        """)
         right_layout.addWidget(self.cart_table)
 
         total_layout = QHBoxLayout()
@@ -716,21 +730,104 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_layout)
 
         # رسالة تحذير
-        warning_label = QLabel('⚠️ ملاحظة: التعديل المباشر على الجدول غير مسموح للمنتجات الموجودة (استخدم زر النسخ أو الإضافة)')
-        warning_label.setStyleSheet("color: #e67e22; font-weight: bold; padding: 5px; background: #fff3cd; border-radius: 3px;")
+        warning_label = QLabel('💡 تلميح: يمكنك التعديل المباشر على المنتجات - سيتم طلب تأكيد قبل حفظ التغييرات')
+        warning_label.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px; background: #d5f4e6; border-radius: 3px;")
         layout.addWidget(warning_label)
 
         self.products_table = QTableWidget()
         self.products_table.setColumnCount(10)
         self.products_table.setHorizontalHeaderLabels(['الكود', 'الاسم', 'الفئة', 'المقاس', 'الشركة', 'سعر الشراء', 'سعر البيع', 'المخزون', 'نسخ', 'حذف'])
         self.products_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        # ✅ منع التعديل المباشر مع رسالة تأكيد
-        self.products_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # ✅ السماح بالتعديل مع رسالة تأكيد
+        self.products_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        # متغير لتتبع حالة التعديل
+        self.products_table_editing = False
+        self.products_table.itemChanged.connect(self.on_product_item_changed)
         
         layout.addWidget(self.products_table)
 
         widget.setLayout(layout)
         return widget
+
+    def on_product_item_changed(self, item):
+        """معالج التعديلات على جدول المنتجات"""
+        # تجنب infinite loop
+        if self.products_table_editing:
+            return
+        
+        # التحقق من أن التغيير ليس من أزرار
+        if item.column() >= 8:  # أزرار النسخ والحذف
+            return
+        
+        # حفظ القيمة الجديدة مؤقتاً
+        new_value = item.text()
+        row = item.row()
+        col = item.column()
+        
+        # قراءة البيانات الحالية من قاعدة البيانات
+        conn = sqlite3.connect(self.db.db_path)
+        cursor = conn.cursor()
+        
+        # الحصول على product_code من العمود 0
+        product_code = self.products_table.item(row, 0).text()
+        cursor.execute("SELECT * FROM products WHERE product_code = ?", (product_code,))
+        product_data = cursor.fetchone()
+        conn.close()
+        
+        if not product_data:
+            return
+        
+        # أسماء الأعمدة
+        columns = ['product_code', 'product_name', 'category', 'size', 'manufacturer', 
+                   'purchase_price', 'selling_price', 'current_stock']
+        column_name = columns[col]
+        old_value = product_data[col + 1]  # +1 لأن product_id هو العمود 0 في البيانات
+        
+        # عرض رسالة التأكيد
+        reply = QMessageBox.question(
+            self, 
+            'تأكيد التعديل',
+            f'هل أنت متأكد من تغيير\n\n'
+            f'الحقل: {self.products_table.horizontalHeaderItem(col).text()}\n'
+            f'من: {old_value}\n'
+            f'إلى: {new_value}',
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # تطبيق التعديل في قاعدة البيانات
+            conn = sqlite3.connect(self.db.db_path)
+            cursor = conn.cursor()
+            
+            try:
+                # التحقق من نوع البيانات
+                if col in [5, 6]:  # أسعار
+                    new_value = float(new_value)
+                elif col == 7:  # مخزون
+                    new_value = int(new_value)
+                
+                cursor.execute(f"UPDATE products SET {column_name} = ? WHERE product_code = ?",
+                             (new_value, product_code))
+                conn.commit()
+                
+                QMessageBox.information(self, 'تم التحديث ✅', f'تم تحديث {column_name} بنجاح!')
+                
+                # تحديث كل البيانات
+                self.load_data()
+                
+            except Exception as e:
+                QMessageBox.critical(self, 'خطأ', f'فشل التحديث:\n{str(e)}')
+                # إعادة القيمة القديمة
+                self.products_table_editing = True
+                item.setText(str(old_value))
+                self.products_table_editing = False
+            finally:
+                conn.close()
+        else:
+            # إلغاء التعديل
+            self.products_table_editing = True
+            item.setText(str(old_value))
+            self.products_table_editing = False
 
     def create_inventory_tab(self):
         widget = QWidget()
@@ -830,6 +927,9 @@ class MainWindow(QMainWindow):
         conn.close()
 
     def load_products_table(self):
+        # منع إطلاق itemChanged أثناء التحميل
+        self.products_table_editing = True
+        
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT product_id, product_code, product_name, category, size, manufacturer, purchase_price, selling_price, current_stock FROM products ORDER BY product_name")
@@ -853,6 +953,9 @@ class MainWindow(QMainWindow):
             self.products_table.setCellWidget(row, 9, del_btn)
 
         conn.close()
+        
+        # تفعيل itemChanged مرة أخرى
+        self.products_table_editing = False
 
     def load_inventory_table(self):
         conn = sqlite3.connect(self.db.db_path)

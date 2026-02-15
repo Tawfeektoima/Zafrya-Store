@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-نظام إدارة محل زفرية - النسخة المحدثة
-Zafrya Store Management System - Fixed Version
+نظام إدارة محل الظافرية - النسخة المحدثة
+AlDhaferya Store Management System - Updated Version
 """
 
 import sys
 import sqlite3
+import hashlib
+import smtplib
+import random
 from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QSpinBox, QDoubleSpinBox, QMessageBox, QTabWidget,
     QGroupBox, QFormLayout, QDialog, QDialogButtonBox, QHeaderView,
-    QTextEdit, QDateEdit, QCompleter
+    QTextEdit, QDateEdit, QCompleter, QInputDialog
 )
 from PyQt5.QtCore import Qt, QDate, QStringListModel
 from PyQt5.QtGui import QFont, QColor
 
 class Database:
     """إدارة قاعدة البيانات"""
-    def __init__(self, db_path='zafrya_store.db'):
+    def __init__(self, db_path='aldhaferya_store.db'):
         self.db_path = db_path
         self.init_db()
 
@@ -68,6 +73,20 @@ class Database:
             )
         """)
 
+        # جدول إعدادات النظام (لحفظ كلمة المرور والإيميل)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL
+            )
+        """)
+
+        # تعيين كلمة مرور افتراضية (admin123 مشفرة)
+        cursor.execute("SELECT setting_value FROM system_settings WHERE setting_key = 'analytics_password'")
+        if cursor.fetchone() is None:
+            default_password = hashlib.sha256('admin123'.encode()).hexdigest()
+            cursor.execute("INSERT INTO system_settings VALUES ('analytics_password', ?)", (default_password,))
+
         # إضافة بيانات تجريبية
         cursor.execute("SELECT COUNT(*) FROM products")
         if cursor.fetchone()[0] == 0:
@@ -88,6 +107,109 @@ class Database:
         conn.commit()
         conn.close()
 
+class AnalyticsProfitDialog(QDialog):
+    """نافذة الأرباح والتحليلات المحمية بكلمة مرور"""
+    def __init__(self, db_path, parent=None):
+        super().__init__(parent)
+        self.db_path = db_path
+        self.setWindowTitle('📊 Analytics & Profits - تحليلات الأرباح')
+        self.setMinimumSize(800, 600)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+
+        # العنوان
+        title = QLabel('📊 تحليلات الأرباح التفصيلية')
+        title.setFont(QFont('Arial', 16, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #2c3e50; padding: 15px; background: #ecf0f1;")
+        layout.addWidget(title)
+
+        # بطاقات الأرباح
+        stats_layout = QHBoxLayout()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # أرباح اليوم
+        cursor.execute("SELECT COALESCE(SUM(total_profit), 0) FROM sales WHERE DATE(sale_date) = DATE('now')")
+        today_profit = cursor.fetchone()[0]
+
+        # أرباح الشهر
+        cursor.execute("SELECT COALESCE(SUM(total_profit), 0) FROM sales WHERE strftime('%Y-%m', sale_date) = strftime('%Y-%m', 'now')")
+        month_profit = cursor.fetchone()[0]
+
+        # إجمالي الأرباح
+        cursor.execute("SELECT COALESCE(SUM(total_profit), 0) FROM sales")
+        total_profit = cursor.fetchone()[0]
+
+        # أرباح متوقعة من المخزون
+        cursor.execute("SELECT COALESCE(SUM(current_stock * (selling_price - purchase_price)), 0) FROM products")
+        expected_profit = cursor.fetchone()[0]
+
+        conn.close()
+
+        stats_layout.addWidget(self.create_profit_card('أرباح اليوم', f'{today_profit:.2f} ج', '#27ae60'))
+        stats_layout.addWidget(self.create_profit_card('أرباح الشهر', f'{month_profit:.2f} ج', '#16a085'))
+        stats_layout.addWidget(self.create_profit_card('إجمالي الأرباح', f'{total_profit:.2f} ج', '#f39c12'))
+        stats_layout.addWidget(self.create_profit_card('أرباح متوقعة', f'{expected_profit:.2f} ج', '#9b59b6'))
+
+        layout.addLayout(stats_layout)
+
+        # جدول تفصيلي بالأرباح
+        table_label = QLabel('📈 تفاصيل الأرباح حسب الفاتورة')
+        table_label.setFont(QFont('Arial', 12, QFont.Bold))
+        layout.addWidget(table_label)
+
+        self.profit_table = QTableWidget()
+        self.profit_table.setColumnCount(5)
+        self.profit_table.setHorizontalHeaderLabels(['رقم الفاتورة', 'التاريخ', 'الإجمالي', 'الربح', 'هامش الربح %'])
+        self.profit_table.horizontalHeader().setStretchLastSection(True)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT sale_id, sale_date, total_amount, total_profit FROM sales ORDER BY sale_date DESC LIMIT 100")
+
+        for row_data in cursor.fetchall():
+            row = self.profit_table.rowCount()
+            self.profit_table.insertRow(row)
+
+            margin = (row_data[3] / row_data[2] * 100) if row_data[2] > 0 else 0
+
+            self.profit_table.setItem(row, 0, QTableWidgetItem(str(row_data[0])))
+            self.profit_table.setItem(row, 1, QTableWidgetItem(row_data[1]))
+            self.profit_table.setItem(row, 2, QTableWidgetItem(f"{row_data[2]:.2f}"))
+            self.profit_table.setItem(row, 3, QTableWidgetItem(f"{row_data[3]:.2f}"))
+            self.profit_table.setItem(row, 4, QTableWidgetItem(f"{margin:.1f}%"))
+
+        conn.close()
+
+        layout.addWidget(self.profit_table)
+
+        # زر الإغلاق
+        close_btn = QPushButton('إغلاق')
+        close_btn.clicked.connect(self.accept)
+        close_btn.setStyleSheet("background: #e74c3c; color: white; padding: 10px; font-size: 14px;")
+        layout.addWidget(close_btn)
+
+        self.setLayout(layout)
+
+    def create_profit_card(self, title, value, color):
+        """إنشاء بطاقة ربح"""
+        group = QGroupBox(title)
+        group.setStyleSheet(f"QGroupBox {{ font-weight: bold; background: {color}; color: white; padding: 10px; border-radius: 5px; }}")
+        layout = QVBoxLayout()
+
+        value_label = QLabel(value)
+        value_label.setFont(QFont('Arial', 18, QFont.Bold))
+        value_label.setAlignment(Qt.AlignCenter)
+        value_label.setStyleSheet("color: white;")
+
+        layout.addWidget(value_label)
+        group.setLayout(layout)
+        return group
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -100,7 +222,7 @@ class MainWindow(QMainWindow):
         from PyQt5.QtCore import QTimer
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.refresh_dashboard)
-        self.refresh_timer.start(3000)  # كل 5 ثواني
+        self.refresh_timer.start(3000)
 
     def init_ui(self):
         self.setWindowTitle('نظام إدارة محل الظافرية')
@@ -112,11 +234,29 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
 
         # العنوان
-        title = QLabel('🏪 نظام إدارة محل ظافرية')
+        header_layout = QHBoxLayout()
+        
+        title = QLabel('🏪 نظام إدارة محل الظافرية')
         title.setFont(QFont('Arial', 22, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: #2c3e50; padding: 15px; background: #ecf0f1;")
-        layout.addWidget(title)
+        header_layout.addWidget(title)
+
+        # أيقونة Analytics
+        analytics_btn = QPushButton('📊 Analytics')
+        analytics_btn.setStyleSheet("background: #9b59b6; color: white; padding: 10px; font-size: 12px; font-weight: bold;")
+        analytics_btn.clicked.connect(self.open_analytics)
+        analytics_btn.setFixedWidth(120)
+        header_layout.addWidget(analytics_btn)
+
+        # أيقونة تغيير كلمة المرور
+        password_btn = QPushButton('🔐 تغيير كلمة المرور')
+        password_btn.setStyleSheet("background: #e67e22; color: white; padding: 10px; font-size: 12px; font-weight: bold;")
+        password_btn.clicked.connect(self.change_password_dialog)
+        password_btn.setFixedWidth(150)
+        header_layout.addWidget(password_btn)
+
+        layout.addLayout(header_layout)
 
         # التبويبات
         self.tabs = QTabWidget()
@@ -133,8 +273,77 @@ class MainWindow(QMainWindow):
         central.setLayout(layout)
         self.statusBar().showMessage('النظام جاهز ✅ | آخر تحديث: ' + datetime.now().strftime('%H:%M:%S'))
 
+    def open_analytics(self):
+        """فتح نافذة التحليلات بعد التحقق من كلمة المرور"""
+        conn = sqlite3.connect(self.db.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT setting_value FROM system_settings WHERE setting_key = 'analytics_password'")
+        stored_password = cursor.fetchone()[0]
+        conn.close()
+
+        password, ok = QInputDialog.getText(self, 'كلمة المرور', 'أدخل كلمة المرور للوصول إلى Analytics:', QLineEdit.Password)
+
+        if ok and password:
+            hashed_input = hashlib.sha256(password.encode()).hexdigest()
+            if hashed_input == stored_password:
+                dialog = AnalyticsProfitDialog(self.db.db_path, self)
+                dialog.exec_()
+            else:
+                QMessageBox.warning(self, 'خطأ', '❌ كلمة المرور غير صحيحة!')
+
+    def change_password_dialog(self):
+        """تغيير كلمة المرور عبر التحقق بالبريد الإلكتروني"""
+        # الحصول على البريد الإلكتروني
+        email, ok = QInputDialog.getText(self, 'تأكيد الهوية', 'أدخل بريدك الإلكتروني:')
+        
+        if not ok or not email:
+            return
+
+        # التحقق من صحة البريد الإلكتروني (تحقق بسيط)
+        if '@' not in email or '.' not in email:
+            QMessageBox.warning(self, 'خطأ', 'البريد الإلكتروني غير صحيح!')
+            return
+
+        # توليد رمز تحقق عشوائي
+        verification_code = str(random.randint(100000, 999999))
+
+        # محاكاة إرسال البريد (في التطبيق الحقيقي، استخدم SMTP)
+        QMessageBox.information(self, 'رمز التحقق', 
+                               f'تم إرسال رمز التحقق إلى {email}\n\nرمز التحقق (للاختبار): {verification_code}\n\nملاحظة: في الإصدار الحقيقي، سيتم إرسال الرمز عبر البريد الإلكتروني.')
+
+        # طلب الرمز من المستخدم
+        entered_code, ok = QInputDialog.getText(self, 'رمز التحقق', 'أدخل رمز التحقق المرسل:')
+
+        if not ok or entered_code != verification_code:
+            QMessageBox.warning(self, 'خطأ', '❌ رمز التحقق غير صحيح!')
+            return
+
+        # طلب كلمة المرور الجديدة
+        new_password, ok = QInputDialog.getText(self, 'كلمة المرور الجديدة', 'أدخل كلمة المرور الجديدة:', QLineEdit.Password)
+
+        if not ok or not new_password or len(new_password) < 6:
+            QMessageBox.warning(self, 'خطأ', 'كلمة المرور يجب أن تكون 6 أحرف على الأقل!')
+            return
+
+        # تأكيد كلمة المرور
+        confirm_password, ok = QInputDialog.getText(self, 'تأكيد كلمة المرور', 'أعد إدخال كلمة المرور:', QLineEdit.Password)
+
+        if not ok or new_password != confirm_password:
+            QMessageBox.warning(self, 'خطأ', '❌ كلمتا المرور غير متطابقتين!')
+            return
+
+        # حفظ كلمة المرور الجديدة
+        hashed_password = hashlib.sha256(new_password.encode()).hexdigest()
+        conn = sqlite3.connect(self.db.db_path)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE system_settings SET setting_value = ? WHERE setting_key = 'analytics_password'", (hashed_password,))
+        conn.commit()
+        conn.close()
+
+        QMessageBox.information(self, 'نجح ✅', 'تم تغيير كلمة المرور بنجاح!')
+
     def create_dashboard_tab(self):
-        """لوحة التحكم"""
+        """لوحة التحكم - بدون الأرباح"""
         widget = QWidget()
         self.dashboard_layout = QVBoxLayout()
 
@@ -163,7 +372,7 @@ class MainWindow(QMainWindow):
         return widget
 
     def refresh_dashboard(self):
-        """تحديث لوحة التحكم"""
+        """تحديث لوحة التحكم - بدون عرض الأرباح"""
         # مسح البطاقات القديمة
         while self.dashboard_stats_layout.count():
             child = self.dashboard_stats_layout.takeAt(0)
@@ -174,8 +383,8 @@ class MainWindow(QMainWindow):
         cursor = conn.cursor()
 
         # عدد الفواتير اليوم
-        cursor.execute("SELECT COUNT(*), COALESCE(SUM(total_amount), 0), COALESCE(SUM(total_profit), 0) FROM sales WHERE DATE(sale_date) = DATE('now')")
-        sales_count, total_sales, total_profit = cursor.fetchone()
+        cursor.execute("SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM sales WHERE DATE(sale_date) = DATE('now')")
+        sales_count, total_sales = cursor.fetchone()
 
         # قيمة المخزون
         cursor.execute("SELECT COALESCE(SUM(current_stock * purchase_price), 0) FROM products")
@@ -187,10 +396,9 @@ class MainWindow(QMainWindow):
 
         conn.close()
 
-        # إضافة البطاقات الجديدة
+        # إضافة البطاقات الجديدة (بدون الأرباح)
         self.dashboard_stats_layout.addWidget(self.create_stat_card('عدد الفواتير اليوم', str(sales_count), '#3498db'))
         self.dashboard_stats_layout.addWidget(self.create_stat_card('إجمالي المبيعات', f'{total_sales:.2f} ج', '#2ecc71'))
-        self.dashboard_stats_layout.addWidget(self.create_stat_card('صافي الربح', f'{total_profit:.2f} ج', '#f39c12'))
         self.dashboard_stats_layout.addWidget(self.create_stat_card('قيمة المخزون', f'{inventory_value:.2f} ج', '#9b59b6'))
         self.dashboard_stats_layout.addWidget(self.create_stat_card('تنبيهات المخزون', str(low_stock), '#e74c3c'))
 
@@ -351,7 +559,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
 
         header_layout = QHBoxLayout()
-        label = QLabel('📈 تقارير المبيعات والأرباح')
+        label = QLabel('📈 تقارير المبيعات')
         label.setFont(QFont('Arial', 14, QFont.Bold))
         header_layout.addWidget(label)
         header_layout.addStretch()
@@ -433,7 +641,7 @@ class MainWindow(QMainWindow):
         conn.close()
 
     def load_inventory_table(self):
-        """تحميل جدول المخزون - محدث"""
+        """تحميل جدول المخزون"""
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT product_code, product_name, category, purchase_price, selling_price, current_stock FROM products ORDER BY category, product_name")
@@ -559,7 +767,7 @@ class MainWindow(QMainWindow):
         self.refresh_cart()
 
     def complete_sale(self):
-        """إتمام عملية البيع"""
+        """إتمام عملية البيع - بدون عرض الأرباح"""
         if not self.cart_items:
             QMessageBox.warning(self, 'تحذير', 'السلة فارغة!')
             return
@@ -590,11 +798,11 @@ class MainWindow(QMainWindow):
 
             conn.commit()
 
+            # رسالة بدون ذكر الأرباح
             QMessageBox.information(self, 'نجح ✅', 
                                   f'تمت عملية البيع بنجاح!\n\n'
                                   f'رقم الفاتورة: {sale_id}\n'
-                                  f'الإجمالي: {total_amount:.2f} جنيه\n'
-                                  f'الربح: {total_profit:.2f} جنيه')
+                                  f'الإجمالي: {total_amount:.2f} جنيه')
 
             self.cart_items = []
             self.refresh_cart()
@@ -748,7 +956,7 @@ class MainWindow(QMainWindow):
 
         # آخر 5 فواتير
         cursor.execute("""
-            SELECT sale_id, sale_date, total_amount, total_profit
+            SELECT sale_id, sale_date, total_amount
             FROM sales
             WHERE DATE(sale_date) = DATE('now')
             ORDER BY sale_date DESC
@@ -765,7 +973,7 @@ class MainWindow(QMainWindow):
 
         conn.close()
 
-        # تنسيق التقرير المحسّن
+        # تنسيق التقرير المحسّن (بدون الأرباح)
         report = f"""
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                     📊 تقرير مبيعات اليوم                          ║
@@ -777,10 +985,8 @@ class MainWindow(QMainWindow):
 └─────────────────────────────────────────────────────────────────────┘
 
   💰 إجمالي المبيعات:        {total_sales:>12.2f} جنيه
-  💵 صافي الربح:             {total_profit:>12.2f} جنيه
   📋 عدد الفواتير:           {sales_count:>12} فاتورة
   📊 متوسط الفاتورة:         {(total_sales / sales_count if sales_count > 0 else 0):>12.2f} جنيه
-  📈 هامش الربح:             {((total_profit / total_sales * 100) if total_sales > 0 else 0):>11.1f} %
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 🏆 أفضل 5 منتجات مبيعاً                                           │
@@ -792,8 +998,7 @@ class MainWindow(QMainWindow):
                 report += f"""
   {i}. [{code}] {name}
      ├─ الكمية المباعة: {qty} قطعة
-     ├─ الإيرادات: {revenue:.2f} جنيه
-     └─ الربح: {profit:.2f} جنيه
+     └─ الإيرادات: {revenue:.2f} جنيه
 """
         else:
             report += "\n  ⚠️  لا توجد مبيعات حتى الآن\n"
@@ -805,9 +1010,9 @@ class MainWindow(QMainWindow):
 """
 
         if recent_sales:
-            for sale_id, sale_date, amount, profit in recent_sales:
+            for sale_id, sale_date, amount in recent_sales:
                 time_str = datetime.strptime(sale_date, '%Y-%m-%d %H:%M:%S').strftime('%H:%M:%S')
-                report += f"  • فاتورة #{sale_id:<4} | {time_str} | {amount:>8.2f} ج | ربح: {profit:>6.2f} ج\n"
+                report += f"  • فاتورة #{sale_id:<4} | {time_str} | {amount:>8.2f} ج\n"
         else:
             report += "  ⚠️  لا توجد فواتير اليوم\n"
 
@@ -822,7 +1027,7 @@ class MainWindow(QMainWindow):
   ⚠️  تنبيهات المخزون:      {low_stock_count:>12} منتج
 
 ╔══════════════════════════════════════════════════════════════════════╗
-║  تم إنشاء التقرير بواسطة: نظام محل زفرية                          ║
+║  تم إنشاء التقرير بواسطة: نظام محل الظافرية                        ║
 ╚══════════════════════════════════════════════════════════════════════╝
 """
 

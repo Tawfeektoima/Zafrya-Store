@@ -18,6 +18,7 @@ from PyQt5.QtGui import QFont, QColor
 from controllers.credit_controller import CreditController
 import sqlite3
 from datetime import datetime, timedelta
+import traceback  # ✅ للتعامل مع الأخطاء
 
 class CustomerDetailsDialog(QDialog):
     """نافذة تفاصيل زبون"""
@@ -460,124 +461,211 @@ class CreateInvoiceDialog(QDialog):
         self.setLayout(layout)
     
     def load_customers(self):
-        customers = self.controller.get_all_customers()
-        for customer in customers:
-            self.customer_combo.addItem(
-                f"{customer['name']} ({customer['phone'] or 'لا يوجد تليفون'})",
-                customer['customer_id']
+        """✅ تحميل قائمة الزبائن مع معالجة الأخطاء"""
+        try:
+            customers = self.controller.get_all_customers()
+            
+            if not customers:
+                QMessageBox.warning(
+                    self, 'تنبيه',
+                    'لا يوجد زبائن!\n\nيجب إضافة زبون أولاً من تبويب "الزبائن".'
+                )
+                self.reject()
+                return
+            
+            for customer in customers:
+                self.customer_combo.addItem(
+                    f"{customer['name']} ({customer['phone'] or 'لا يوجد تليفون'})",
+                    customer['customer_id']
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'خطأ',
+                f'فشل تحميل الزبائن:\n{str(e)}\n\n{traceback.format_exc()}'
             )
+            self.reject()
     
     def search_products(self):
-        search_term = self.product_search.text().strip()
-        
-        if len(search_term) < 1:
+        """✅ البحث عن المنتجات مع معالجة الأخطاء"""
+        try:
+            search_term = self.product_search.text().strip()
+            
+            if len(search_term) < 1:
+                self.search_table.setRowCount(0)
+                return
+            
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT * FROM products
+                WHERE product_code LIKE ? OR product_name LIKE ?
+                LIMIT 10
+            """, (f'%{search_term}%', f'%{search_term}%'))
+            
+            products = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            
             self.search_table.setRowCount(0)
-            return
-        
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM products
-            WHERE product_code LIKE ? OR product_name LIKE ?
-            LIMIT 10
-        """, (f'%{search_term}%', f'%{search_term}%'))
-        
-        products = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        self.search_table.setRowCount(0)
-        for product in products:
-            row = self.search_table.rowCount()
-            self.search_table.insertRow(row)
-            
-            self.search_table.setItem(row, 0, QTableWidgetItem(product['product_code']))
-            self.search_table.setItem(row, 1, QTableWidgetItem(product['product_name']))
-            self.search_table.setItem(row, 2, QTableWidgetItem(f"{product['selling_price']:.2f}"))
-            self.search_table.setItem(row, 3, QTableWidgetItem(str(product['current_stock'])))
-            
-            qty_spin = QSpinBox()
-            qty_spin.setMinimum(1)
-            qty_spin.setMaximum(product['current_stock'])
-            qty_spin.setValue(1)
-            self.search_table.setCellWidget(row, 4, qty_spin)
-            
-            add_btn = QPushButton('➕')
-            add_btn.clicked.connect(
-                lambda checked, p=product, sp=qty_spin: 
-                self.add_to_cart(p, sp.value())
+            for product in products:
+                row = self.search_table.rowCount()
+                self.search_table.insertRow(row)
+                
+                self.search_table.setItem(row, 0, QTableWidgetItem(product['product_code']))
+                self.search_table.setItem(row, 1, QTableWidgetItem(product['product_name']))
+                self.search_table.setItem(row, 2, QTableWidgetItem(f"{product['selling_price']:.2f}"))
+                self.search_table.setItem(row, 3, QTableWidgetItem(str(product['current_stock'])))
+                
+                qty_spin = QSpinBox()
+                qty_spin.setMinimum(1)
+                qty_spin.setMaximum(max(1, product['current_stock']))  # ✅ Fix: at least 1
+                qty_spin.setValue(1)
+                self.search_table.setCellWidget(row, 4, qty_spin)
+                
+                add_btn = QPushButton('➕')
+                add_btn.clicked.connect(
+                    lambda checked, p=product, sp=qty_spin: 
+                    self.add_to_cart(p, sp.value())
+                )
+                add_btn.setStyleSheet("background: #27ae60; color: white;")
+                self.search_table.setCellWidget(row, 5, add_btn)
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'خطأ',
+                f'فشل البحث عن المنتجات:\n{str(e)}\n\n{traceback.format_exc()}'
             )
-            add_btn.setStyleSheet("background: #27ae60; color: white;")
-            self.search_table.setCellWidget(row, 5, add_btn)
     
     def add_to_cart(self, product, quantity):
-        # التحقق من عدم وجوده مسبقاً
-        for item in self.cart_items:
-            if item['code'] == product['product_code']:
-                item['qty'] += quantity
-                self.refresh_cart()
+        """✅ إضافة منتج للسلة مع معالجة الأخطاء"""
+        try:
+            # التحقق من المخزون
+            if quantity > product['current_stock']:
+                QMessageBox.warning(
+                    self, 'تحذير',
+                    f'الكمية المطلوبة ({quantity}) أكبر من المخزون ({product["current_stock"]})!'
+                )
                 return
-        
-        self.cart_items.append({
-            'code': product['product_code'],
-            'name': product['product_name'],
-            'price': product['selling_price'],
-            'qty': quantity
-        })
-        
-        self.refresh_cart()
-        self.product_search.clear()
+            
+            # التحقق من عدم وجوده مسبقاً
+            for item in self.cart_items:
+                if item['code'] == product['product_code']:
+                    item['qty'] += quantity
+                    self.refresh_cart()
+                    return
+            
+            self.cart_items.append({
+                'code': product['product_code'],
+                'name': product['product_name'],
+                'price': product['selling_price'],
+                'qty': quantity
+            })
+            
+            self.refresh_cart()
+            self.product_search.clear()
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'خطأ',
+                f'فشل إضافة المنتج:\n{str(e)}\n\n{traceback.format_exc()}'
+            )
     
     def refresh_cart(self):
-        self.cart_table.setRowCount(0)
-        total = 0
-        
-        for i, item in enumerate(self.cart_items):
-            row = self.cart_table.rowCount()
-            self.cart_table.insertRow(row)
+        """✅ تحديث سلة المشتريات"""
+        try:
+            self.cart_table.setRowCount(0)
+            total = 0
             
-            subtotal = item['qty'] * item['price']
-            total += subtotal
+            for i, item in enumerate(self.cart_items):
+                row = self.cart_table.rowCount()
+                self.cart_table.insertRow(row)
+                
+                subtotal = item['qty'] * item['price']
+                total += subtotal
+                
+                self.cart_table.setItem(row, 0, QTableWidgetItem(item['code']))
+                self.cart_table.setItem(row, 1, QTableWidgetItem(item['name']))
+                self.cart_table.setItem(row, 2, QTableWidgetItem(f"{item['price']:.2f}"))
+                self.cart_table.setItem(row, 3, QTableWidgetItem(str(item['qty'])))
+                self.cart_table.setItem(row, 4, QTableWidgetItem(f"{subtotal:.2f}"))
+                
+                del_btn = QPushButton('🗑️')
+                del_btn.clicked.connect(lambda checked, idx=i: self.remove_from_cart(idx))
+                del_btn.setStyleSheet("background: #e74c3c; color: white;")
+                self.cart_table.setCellWidget(row, 5, del_btn)
             
-            self.cart_table.setItem(row, 0, QTableWidgetItem(item['code']))
-            self.cart_table.setItem(row, 1, QTableWidgetItem(item['name']))
-            self.cart_table.setItem(row, 2, QTableWidgetItem(f"{item['price']:.2f}"))
-            self.cart_table.setItem(row, 3, QTableWidgetItem(str(item['qty'])))
-            self.cart_table.setItem(row, 4, QTableWidgetItem(f"{subtotal:.2f}"))
+            self.total_label.setText(f'الإجمالي: {total:.2f} جنيه')
             
-            del_btn = QPushButton('🗑️')
-            del_btn.clicked.connect(lambda checked, idx=i: self.remove_from_cart(idx))
-            del_btn.setStyleSheet("background: #e74c3c; color: white;")
-            self.cart_table.setCellWidget(row, 5, del_btn)
-        
-        self.total_label.setText(f'الإجمالي: {total:.2f} جنيه')
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'خطأ',
+                f'فشل تحديث السلة:\n{str(e)}\n\n{traceback.format_exc()}'
+            )
     
     def remove_from_cart(self, index):
-        del self.cart_items[index]
-        self.refresh_cart()
+        """✅ حذف منتج من السلة"""
+        try:
+            del self.cart_items[index]
+            self.refresh_cart()
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'خطأ',
+                f'فشل حذف المنتج:\n{str(e)}'
+            )
     
     def create_invoice(self):
-        if self.customer_combo.currentIndex() < 0:
-            QMessageBox.warning(self, 'خطأ', 'يجب اختيار زبون!')
-            return
-        
-        if not self.cart_items:
-            QMessageBox.warning(self, 'خطأ', 'يجب إضافة منتجات!')
-            return
-        
-        customer_id = self.customer_combo.currentData()
-        due_date = self.due_date.date().toString('yyyy-MM-dd')
-        
-        success, invoice_id, invoice_number, message = self.controller.create_credit_sale(
-            customer_id, self.cart_items, due_date
-        )
-        
-        if success:
-            QMessageBox.information(
-                self, 'نجح ✅',
-                f'{message}\n\nرقم الفاتورة: {invoice_number}'
+        """✅ إنشاء الفاتورة مع معالجة شاملة للأخطاء"""
+        try:
+            # التحقق من اختيار زبون
+            if self.customer_combo.currentIndex() < 0:
+                QMessageBox.warning(self, 'خطأ', 'يجب اختيار زبون!')
+                return
+            
+            # التحقق من وجود منتجات
+            if not self.cart_items:
+                QMessageBox.warning(self, 'خطأ', 'يجب إضافة منتجات!')
+                return
+            
+            customer_id = self.customer_combo.currentData()
+            due_date = self.due_date.date().toString('yyyy-MM-dd')
+            
+            # استدعاء الـ controller
+            result = self.controller.create_credit_sale(
+                customer_id, self.cart_items, due_date
             )
-            self.accept()
-        else:
-            QMessageBox.warning(self, 'خطأ', message)
+            
+            # ✅ التحقق من نوع النتيجة
+            if not isinstance(result, tuple) or len(result) != 4:
+                raise ValueError(f"نتيجة غير متوقعة من create_credit_sale: {result}")
+            
+            success, invoice_id, invoice_number, message = result
+            
+            if success:
+                QMessageBox.information(
+                    self, 'نجح ✅',
+                    f'{message}\n\nرقم الفاتورة: {invoice_number}'
+                )
+                self.accept()
+            else:
+                QMessageBox.warning(self, 'خطأ', message)
+                
+        except Exception as e:
+            # ✅ عرض رسالة خطأ تفصيلية
+            error_msg = f"""فشل إنشاء الفاتورة!
+
+الخطأ: {str(e)}
+
+التفاصيل الفنية:
+{traceback.format_exc()}
+
+الرجاء التحقق من:
+1. أن المنتجات متوفرة في المخزون
+2. أن قاعدة البيانات تعمل بشكل صحيح
+3. أن جميع الحقول مملوءة بشكل صحيح"""
+            
+            QMessageBox.critical(self, 'خطأ فادح', error_msg)
+            print("\n" + "="*60)
+            print("❌ ERROR IN CREATE_INVOICE:")
+            print(traceback.format_exc())
+            print("="*60 + "\n")

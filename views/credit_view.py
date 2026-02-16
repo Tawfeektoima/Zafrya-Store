@@ -18,13 +18,14 @@ from PyQt5.QtGui import QFont, QColor
 from controllers.credit_controller import CreditController
 from datetime import datetime, timedelta
 
-# ✅ Import all dialogs
+# ✅ Import dialogs and quick view
 from views.credit_dialogs import (
     CustomerDetailsDialog,
     InvoiceDetailsDialog,
     AddPaymentDialog,
     CreateInvoiceDialog
 )
+from views.quick_credit_view import QuickCreditView
 
 class CreditManagementView(QWidget):
     """الواجهة الرئيسية لإدارة الديون"""
@@ -53,9 +54,14 @@ class CreditManagementView(QWidget):
         
         # التبويبات
         self.tabs = QTabWidget()
+        
+        # ✅ التاب الرئيسي: التسجيل السريع
+        self.tabs.addTab(QuickCreditView(self.db_path, self), '⚡ تسجيل فاتورة')
+        
+        # باقي التبويبات للتفاصيل
         self.tabs.addTab(self.create_customers_tab(), '👥 الزبائن')
-        self.tabs.addTab(self.create_invoices_tab(), '🧾 الفواتير')
         self.tabs.addTab(self.create_overdue_tab(), '⚠️ المتأخرون')
+        
         layout.addWidget(self.tabs)
         
         self.setLayout(layout)
@@ -107,40 +113,6 @@ class CreditManagementView(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def create_invoices_tab(self):
-        """تبويب الفواتير"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        
-        btn_layout = QHBoxLayout()
-        
-        create_btn = QPushButton('➕ إنشاء فاتورة آجلة')
-        create_btn.clicked.connect(self.create_invoice_dialog)
-        create_btn.setStyleSheet("background: #9b59b6; color: white; padding: 10px; font-size: 14px;")
-        btn_layout.addWidget(create_btn)
-        
-        refresh_btn = QPushButton('🔄 تحديث')
-        refresh_btn.clicked.connect(self.load_invoices)
-        refresh_btn.setStyleSheet("background: #3498db; color: white; padding: 10px;")
-        btn_layout.addWidget(refresh_btn)
-        
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
-        
-        # جدول الفواتير
-        self.invoices_table = QTableWidget()
-        self.invoices_table.setColumnCount(8)
-        self.invoices_table.setHorizontalHeaderLabels([
-            'رقم الفاتورة', 'الزبون', 'التاريخ', 'الإجمالي', 
-            'المدفوع', 'المتبقي', 'الحالة', 'التفاصيل'
-        ])
-        self.invoices_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.invoices_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        layout.addWidget(self.invoices_table)
-        
-        widget.setLayout(layout)
-        return widget
-    
     def create_overdue_tab(self):
         """تبويب المتأخرون في السداد"""
         widget = QWidget()
@@ -168,7 +140,6 @@ class CreditManagementView(QWidget):
         """تحميل جميع البيانات"""
         self.load_stats()
         self.load_customers()
-        self.load_invoices()
         self.load_overdue()
     
     def load_stats(self):
@@ -287,59 +258,6 @@ class CreditManagementView(QWidget):
             )
             details_btn.setStyleSheet("background: #3498db; color: white; padding: 5px;")
             self.customers_table.setCellWidget(row, 5, details_btn)
-    
-    def load_invoices(self):
-        """تحميل جدول الفواتير"""
-        # هنا نستخدم query مباشر للحصول على كل الفواتير
-        import sqlite3
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT ci.*, c.name as customer_name
-            FROM credit_invoices ci
-            JOIN customers c ON ci.customer_id = c.customer_id
-            ORDER BY ci.invoice_date DESC
-            LIMIT 100
-        """)
-        
-        invoices = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        self.invoices_table.setRowCount(0)
-        for invoice in invoices:
-            row = self.invoices_table.rowCount()
-            self.invoices_table.insertRow(row)
-            
-            self.invoices_table.setItem(row, 0, QTableWidgetItem(invoice['invoice_number']))
-            self.invoices_table.setItem(row, 1, QTableWidgetItem(invoice['customer_name']))
-            self.invoices_table.setItem(row, 2, QTableWidgetItem(invoice['invoice_date']))
-            self.invoices_table.setItem(row, 3, QTableWidgetItem(f"{invoice['total_amount']:.2f} ج"))
-            self.invoices_table.setItem(row, 4, QTableWidgetItem(f"{invoice['paid_amount']:.2f} ج"))
-            self.invoices_table.setItem(row, 5, QTableWidgetItem(f"{invoice['remaining_amount']:.2f} ج"))
-            
-            # الحالة
-            status_map = {
-                'pending': '⏳ معلق',
-                'partial': '⚠️ جزئي',
-                'paid': '✅ مدفوع'
-            }
-            status_item = QTableWidgetItem(status_map.get(invoice['status'], '⏳ معلق'))
-            if invoice['status'] == 'paid':
-                status_item.setBackground(QColor(200, 255, 200))
-            elif invoice['status'] == 'partial':
-                status_item.setBackground(QColor(255, 255, 200))
-            self.invoices_table.setItem(row, 6, status_item)
-            
-            # زر التفاصيل
-            details_btn = QPushButton('📄 عرض')
-            details_btn.clicked.connect(
-                lambda checked, iid=invoice['invoice_id']: 
-                self.show_invoice_details(iid)
-            )
-            details_btn.setStyleSheet("background: #9b59b6; color: white; padding: 5px;")
-            self.invoices_table.setCellWidget(row, 7, details_btn)
     
     def load_overdue(self):
         """تحميل المتأخرون في السداد"""
@@ -471,18 +389,6 @@ class CreditManagementView(QWidget):
         dialog = CustomerDetailsDialog(customer_id, self.db_path, self)
         dialog.exec_()
         self.load_data()  # تحديث البيانات بعد الإغلاق
-    
-    def show_invoice_details(self, invoice_id):
-        """عرض تفاصيل فاتورة"""
-        dialog = InvoiceDetailsDialog(invoice_id, self.db_path, self)
-        dialog.exec_()
-        self.load_data()
-    
-    def create_invoice_dialog(self):
-        """نافذة إنشاء فاتورة آجلة"""
-        dialog = CreateInvoiceDialog(self.db_path, self)
-        if dialog.exec_():
-            self.load_data()
     
     def add_payment_dialog(self, customer_id, invoice_id):
         """نافذة تسجيل دفعة"""

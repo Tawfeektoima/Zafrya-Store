@@ -71,7 +71,9 @@ class QuickCreditView(QWidget):
         self.name_input.textChanged.connect(self.search_customer_by_name)
         
         self.phone_input = QLineEdit()
-        self.phone_input.setPlaceholderText('01234567890')
+        self.phone_input.setPlaceholderText('01234567890 (11 رقم)')
+        self.phone_input.setMaxLength(11)  # ✅ حدد 11 رقم فقط
+        self.phone_input.textChanged.connect(self.validate_phone)
         self.phone_input.textChanged.connect(self.search_customer_by_phone)
         
         customer_layout.addRow('الاسم:', self.name_input)
@@ -79,6 +81,18 @@ class QuickCreditView(QWidget):
         
         customer_group.setLayout(customer_layout)
         layout.addWidget(customer_group)
+        
+        # ✅ رسالة التحقق من التليفون
+        self.phone_validation_label = QLabel()
+        self.phone_validation_label.setStyleSheet("""
+            QLabel {
+                padding: 5px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+        """)
+        self.phone_validation_label.hide()
+        layout.addWidget(self.phone_validation_label)
         
         # اقتراحات الزبائن
         self.suggestions_label = QLabel()
@@ -254,6 +268,73 @@ class QuickCreditView(QWidget):
         
         widget.setLayout(layout)
         return widget
+    
+    def validate_phone(self):
+        """✅ التحقق من رقم التليفون (11 رقم)"""
+        phone = self.phone_input.text().strip()
+        
+        if len(phone) == 0:
+            self.phone_validation_label.hide()
+            return False
+        
+        # التحقق من أنها أرقام فقط
+        if not phone.isdigit():
+            self.phone_validation_label.setText('❌ أرقام فقط')
+            self.phone_validation_label.setStyleSheet("""
+                QLabel {
+                    background: #fadbd8;
+                    color: #e74c3c;
+                    padding: 5px;
+                    border-radius: 3px;
+                    font-weight: bold;
+                }
+            """)
+            self.phone_validation_label.show()
+            return False
+        
+        if len(phone) < 11:
+            self.phone_validation_label.setText(f'⚠️ {len(phone)}/11 رقم')
+            self.phone_validation_label.setStyleSheet("""
+                QLabel {
+                    background: #fff3cd;
+                    color: #f39c12;
+                    padding: 5px;
+                    border-radius: 3px;
+                    font-weight: bold;
+                }
+            """)
+            self.phone_validation_label.show()
+            return False
+        
+        if len(phone) == 11:
+            if not phone.startswith('01'):
+                self.phone_validation_label.setText('❌ يجب أن يبدأ بـ 01')
+                self.phone_validation_label.setStyleSheet("""
+                    QLabel {
+                        background: #fadbd8;
+                        color: #e74c3c;
+                        padding: 5px;
+                        border-radius: 3px;
+                        font-weight: bold;
+                    }
+                """)
+                self.phone_validation_label.show()
+                return False
+            
+            self.phone_validation_label.setText('✅ صحيح')
+            self.phone_validation_label.setStyleSheet("""
+                QLabel {
+                    background: #d5f4e6;
+                    color: #27ae60;
+                    padding: 5px;
+                    border-radius: 3px;
+                    font-weight: bold;
+                }
+            """)
+            self.phone_validation_label.show()
+            return True
+        
+        return False
     
     def search_customer_by_name(self):
         """البحث عن زبون بالاسم"""
@@ -443,6 +524,11 @@ class QuickCreditView(QWidget):
                 QMessageBox.warning(self, 'خطأ', 'يجب إدخال اسم الزبون!')
                 return
             
+            # ✅ التحقق من رقم التليفون
+            if phone and not self.validate_phone():
+                QMessageBox.warning(self, 'خطأ', 'رقم التليفون غير صحيح!\nيجب أن يكون 11 رقم ويبدأ بـ 01')
+                return
+            
             if not self.cart_items:
                 QMessageBox.warning(self, 'خطأ', 'يجب إضافة منتجات!')
                 return
@@ -535,6 +621,7 @@ class QuickCreditView(QWidget):
         self.cart_items = []
         self.current_customer = None
         self.suggestions_label.hide()
+        self.phone_validation_label.hide()
         self.refresh_cart()
         self.due_date.setDate(QDate.currentDate().addDays(30))
     
@@ -631,6 +718,7 @@ class QuickCreditView(QWidget):
     
     def edit_invoice_dialog(self, invoice_id):
         """نافذة تعديل الفاتورة"""
+        from views.credit_dialogs import InvoiceDetailsDialog
         dialog = EditInvoiceDialog(invoice_id, self.db_path, self)
         if dialog.exec_():
             self.load_invoices()

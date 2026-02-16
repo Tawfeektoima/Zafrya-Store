@@ -18,6 +18,14 @@ from PyQt5.QtGui import QFont, QColor
 from controllers.credit_controller import CreditController
 from datetime import datetime, timedelta
 
+# ✅ Import all dialogs
+from views.credit_dialogs import (
+    CustomerDetailsDialog,
+    InvoiceDetailsDialog,
+    AddPaymentDialog,
+    CreateInvoiceDialog
+)
+
 class CreditManagementView(QWidget):
     """الواجهة الرئيسية لإدارة الديون"""
     
@@ -444,7 +452,7 @@ class CreditManagementView(QWidget):
         """حذف زبون"""
         reply = QMessageBox.question(
             self, 'تأكيد الحذف',
-            'هل تريد حذف هذا الزبون؟\n'
+            'هل تريد حذف هذا الزبون？\n'
             'سيتم حذف جميع سجلاته أيضاً!',
             QMessageBox.Yes | QMessageBox.No
         )
@@ -481,6 +489,3 @@ class CreditManagementView(QWidget):
         dialog = AddPaymentDialog(customer_id, invoice_id, self.db_path, self)
         if dialog.exec_():
             self.load_data()
-
-
-# سأرسل باقي الـ dialogs في ملف منفصل للحفاظ على الحجم
